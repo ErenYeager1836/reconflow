@@ -260,3 +260,13 @@ python -m unittest discover tests -v
 ## License
 
 MIT
+
+## Quiet output for UNIX pipelines
+
+Pass `-q`, `--quiet`, or `--silent` to the `scan` command to keep stdout machine-readable:
+
+```sh
+python -m reconflow scan example.com --quiet | sort -u > targets.txt
+```
+
+Progress and scan diagnostics go to stderr, while stdout contains the discovered live HTTP(S) URLs (one per line); if no live hosts were found, the discovered subdomains are emitted instead. The ordinary Markdown report, run snapshots and optional `--json` report file are still written. Without the flag, the normal human-readable progress output is unchanged. This mode does not initiate any additional scanning beyond the regular `scan` command.

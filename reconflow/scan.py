@@ -1,6 +1,7 @@
 """reconflow.scan - subdomain discovery and live host probing pipeline."""
 
 import argparse
+import contextlib
 import json
 import random
 import shutil
@@ -484,7 +485,36 @@ def write_report(
 
 
 def run(args):
-    """Run the core recon pipeline using provided arguments namespace."""
+    """Run scans quietly for UNIX piping while retaining normal report files."""
+    if getattr(args, "silent", False) is not True:
+        return _run_scan(args)
+
+    # Redirect scanner progress to stderr, including output from its helpers.
+    # Only machine-consumable targets should appear on stdout.
+    with contextlib.redirect_stdout(sys.stderr):
+        result = _run_scan(args)
+
+    targets = []
+    for host in result.get("hosts", []):
+        url = host.get("url") if isinstance(host, dict) else None
+        if url and url.startswith(("https://", "http://")):
+            targets.append(url)
+    if not targets:
+        for entry in result.get("live", []):
+            if isinstance(entry, str):
+                url = entry.split()[0] if entry.split() else ""
+                if url.startswith(("https://", "http://")):
+                    targets.append(url)
+    if not targets:
+        targets = list(result.get("subdomains", []))
+
+    for target in dict.fromkeys(targets):
+        print(target)
+    return result
+
+
+def _run_scan(args):
+    """Execute the full scan pipeline with normal informational output."""
     domain = getattr(args, "domain", None)
     if not domain:
         sys.exit("Error: Target domain is required.")
@@ -642,6 +672,12 @@ def main():
         action="store_true",
         dest="json_report",
         help="also write results to report.json",
+    )
+    parser.add_argument(
+        "-q", "--quiet", "--silent",
+        action="store_true",
+        dest="silent",
+        help="Show only discovered URLs/subdomains on stdout; progress goes to stderr",
     )
     parser.add_argument(
         "--screenshots",

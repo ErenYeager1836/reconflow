@@ -64,6 +64,12 @@ def build_parser():
         help="Also write structured results to report.json",
     )
     p_scan.add_argument(
+        "-q", "--quiet", "--silent",
+        action="store_true",
+        dest="silent",
+        help="Show only discovered targets/URLs on stdout; send progress to stderr",
+    )
+    p_scan.add_argument(
         "--screenshots",
         action="store_true",
         help="Capture screenshots of live hosts using gowitness",
