@@ -69,6 +69,12 @@ def build_parser():
         help="Export discovered live hosts to report.csv (no external dependencies)",
     )
     p_scan.add_argument(
+        "-q", "--quiet", "--silent",
+        action="store_true",
+        dest="silent",
+        help="Show only discovered targets/URLs on stdout; send progress to stderr",
+    )
+    p_scan.add_argument(
         "--screenshots",
         action="store_true",
         help="Capture screenshots of live hosts using gowitness",

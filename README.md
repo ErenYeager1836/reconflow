@@ -261,6 +261,7 @@ python -m unittest discover tests -v
 
 MIT
 
+<<<<<<< HEAD
 ## CSV reports
 
 Use `--csv` on a scan to generate a spreadsheet-compatible `report.csv` alongside
@@ -278,3 +279,14 @@ from the URL, joins technology names with semicolons, and leaves fields blank
 when the scanner did not collect them. An empty scan still writes the header.
 All CSV quoting is handled by Python's standard `csv` module; no extra
 packages are required.
+=======
+## Quiet output for UNIX pipelines
+
+Pass `-q`, `--quiet`, or `--silent` to the `scan` command to keep stdout machine-readable:
+
+```sh
+python -m reconflow scan example.com --quiet | sort -u > targets.txt
+```
+
+Progress and scan diagnostics go to stderr, while stdout contains the discovered live HTTP(S) URLs (one per line); if no live hosts were found, the discovered subdomains are emitted instead. The ordinary Markdown report, run snapshots and optional `--json` report file are still written. Without the flag, the normal human-readable progress output is unchanged. This mode does not initiate any additional scanning beyond the regular `scan` command.
+>>>>>>> 60a12bb (feat(scan): support quiet pipeline output (#14))
