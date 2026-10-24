@@ -260,3 +260,21 @@ python -m unittest discover tests -v
 ## License
 
 MIT
+
+## CSV reports
+
+Use `--csv` on a scan to generate a spreadsheet-compatible `report.csv` alongside
+`report.md` under `output/<domain>/`:
+
+```sh
+python -m reconflow scan example.com --csv
+python -m reconflow scan example.com --csv --json --output my-results
+```
+
+The CSV contains `subdomain`, `ip`, `status_code`, `title`, `technologies`,
+`cname`, and `takeover_risk` columns. Existing probe results primarily include
+URLs, status, title and technology names. The exporter extracts the subdomain
+from the URL, joins technology names with semicolons, and leaves fields blank
+when the scanner did not collect them. An empty scan still writes the header.
+All CSV quoting is handled by Python's standard `csv` module; no extra
+packages are required.
