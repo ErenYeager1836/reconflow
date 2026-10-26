@@ -1,9 +1,58 @@
 """reconflow.report - Regenerate reports from saved scan snapshots."""
 
+import csv
 import json
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 from . import history
+
+
+CSV_COLUMNS = (
+    "subdomain",
+    "ip",
+    "status_code",
+    "title",
+    "technologies",
+    "cname",
+    "takeover_risk",
+)
+
+
+def export_csv(target, live_hosts, output_dir):
+    """Export live host records to report.csv using standard CSV quoting.
+
+    Reconflow's probe snapshots identify hosts primarily by URL. Optional
+    enrichment fields absent from a scan become empty cells rather than
+    causing an error. The target provides a fallback for incomplete rows.
+    """
+    directory = Path(output_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "report.csv"
+
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=CSV_COLUMNS)
+        writer.writeheader()
+        for host in live_hosts or []:
+            if not isinstance(host, dict):
+                continue
+            url = str(host.get("url") or "")
+            hostname = urlsplit(url).hostname if url else None
+            technologies = host.get("technologies") or []
+            if isinstance(technologies, (list, tuple)):
+                technologies = "; ".join(str(item) for item in technologies)
+            writer.writerow(
+                {
+                    "subdomain": host.get("subdomain") or hostname or target,
+                    "ip": host.get("ip") or "",
+                    "status_code": host.get("status_code") if host.get("status_code") is not None else "",
+                    "title": host.get("title") or "",
+                    "technologies": technologies,
+                    "cname": host.get("cname") or "",
+                    "takeover_risk": host.get("takeover_risk") if host.get("takeover_risk") is not None else "",
+                }
+            )
+    return path
 
 
 def format_host_display(host: dict) -> str:

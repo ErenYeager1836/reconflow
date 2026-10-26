@@ -64,6 +64,11 @@ def build_parser():
         help="Also write structured results to report.json",
     )
     p_scan.add_argument(
+        "--csv",
+        action="store_true",
+        help="Export discovered live hosts to report.csv (no external dependencies)",
+    )
+    p_scan.add_argument(
         "--screenshots",
         action="store_true",
         help="Capture screenshots of live hosts using gowitness",

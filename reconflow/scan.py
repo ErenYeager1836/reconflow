@@ -494,6 +494,7 @@ def run(args):
     timeout = getattr(args, "timeout", None)
     keep_wildcard = getattr(args, "keep_wildcard", False)
     json_report = bool(getattr(args, "json_report", False) or getattr(args, "json", False))
+    csv_report = bool(getattr(args, "csv", False))
     screenshots_enabled = getattr(args, "screenshots", False)
     scope_file = getattr(args, "scope", None)
     scope_data = None
@@ -598,6 +599,11 @@ def run(args):
             screenshots=screenshots,
         )
 
+        if csv_report:
+            from .report import export_csv
+
+            export_csv(domain, hosts_data, out_dir)
+
         history.finalize_run(run_dir, subs, hosts_data or [], domain=domain)
         print(f"[+] Saved scan snapshot ({run_id})")
 
@@ -642,6 +648,11 @@ def main():
         action="store_true",
         dest="json_report",
         help="also write results to report.json",
+    )
+    parser.add_argument(
+        "--csv",
+        action="store_true",
+        help="write live host data to report.csv",
     )
     parser.add_argument(
         "--screenshots",
