@@ -41,15 +41,17 @@ def export_csv(target, live_hosts, output_dir):
             technologies = host.get("technologies") or []
             if isinstance(technologies, (list, tuple)):
                 technologies = "; ".join(str(item) for item in technologies)
+            status_code = host.get("status_code")
+            takeover_risk = host.get("takeover_risk")
             writer.writerow(
                 {
                     "subdomain": host.get("subdomain") or hostname or target,
                     "ip": host.get("ip") or "",
-                    "status_code": host.get("status_code") if host.get("status_code") is not None else "",
+                    "status_code": status_code if status_code is not None else "",
                     "title": host.get("title") or "",
                     "technologies": technologies,
                     "cname": host.get("cname") or "",
-                    "takeover_risk": host.get("takeover_risk") if host.get("takeover_risk") is not None else "",
+                    "takeover_risk": takeover_risk if takeover_risk is not None else "",
                 }
             )
     return path
