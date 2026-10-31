@@ -244,3 +244,93 @@ def extract_hints_for_change(url: str, diffs: dict, new_host_meta: dict = None) 
             hints.append(h)
 
     return hints
+
+
+def score_lead(target: str, meta: dict = None) -> int:
+    """Calculate an interest score (0 to 100) for a host or URL."""
+    score = 0
+    meta = meta or {}
+    t_lower = target.lower()
+
+    # High-value exposure patterns (+30)
+    high_value_keywords = (
+        ".env",
+        ".git",
+        "backup",
+        "dump",
+        ".sql",
+        "heapdump",
+        "actuator",
+    )
+    if any(k in t_lower for k in high_value_keywords):
+        score += 30
+
+    # API / documentation / debug (+25)
+    api_keywords = ("swagger", "openapi", "graphql", "api/v", "debug", "trace")
+    if any(k in t_lower for k in api_keywords):
+        score += 25
+
+    # Admin / internal / dev environment (+20)
+    env_keywords = (
+        "admin",
+        "internal",
+        "intranet",
+        "corp",
+        "dev.",
+        "staging.",
+        "test.",
+    )
+    if any(k in t_lower for k in env_keywords):
+        score += 20
+
+    # Auth / access portals (+15)
+    auth_keywords = ("login", "signin", "sso", "oauth", "portal", "auth")
+    if any(k in t_lower for k in auth_keywords):
+        score += 15
+
+    # Dangerous parameter indicators in URLs (+15)
+    param_keywords = (
+        "url=",
+        "redirect=",
+        "next=",
+        "dest=",
+        "target=",
+        "file=",
+        "path=",
+    )
+    if any(p in t_lower for p in param_keywords):
+        score += 15
+
+    # Status codes (+10)
+    status_code = meta.get("status_code")
+    if status_code in (401, 403, 500):
+        score += 10
+
+    return min(score, 100)
+
+
+def rank_leads(targets: list) -> list:
+    """Rank hosts or URLs by score in descending order."""
+    ranked = []
+    for item in targets:
+        if isinstance(item, dict):
+            url = item.get("url") or item.get("host") or ""
+            meta = item
+        else:
+            url = str(item)
+            meta = {}
+        score = score_lead(url, meta)
+        hints = extract_hints_for_host(
+            url,
+            status_code=meta.get("status_code"),
+            title=meta.get("title"),
+            tech=meta.get("technologies"),
+        )
+        ranked.append({
+            "target": url,
+            "score": score,
+            "hints": hints,
+            "meta": meta,
+        })
+    ranked.sort(key=lambda x: x["score"], reverse=True)
+    return ranked
