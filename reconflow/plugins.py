@@ -26,8 +26,16 @@ def verify_projectdiscovery_binary(
         )
         combined = (res.stdout + "\n" + res.stderr)
         combined_lower = combined.lower()
-        if "projectdiscovery" in combined_lower or "current version" in combined_lower:
-            pattern = r"(?:Current Version:?|version:?|v)\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?)"
+        if (
+            "projectdiscovery" in combined_lower
+            or "current version" in combined_lower
+            or "pdcp" in combined_lower
+            or "engine version" in combined_lower
+        ):
+            pattern = (
+                r"(?:Current Version:?|Engine Version:?|version:?|v)\s*"
+                r"([0-9]+\.[0-9]+(?:\.[0-9]+)?)"
+            )
             match = re.search(pattern, combined, re.IGNORECASE)
             version_str = f"v{match.group(1)}" if match else "installed"
             return True, version_str
