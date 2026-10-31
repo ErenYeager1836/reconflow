@@ -1,5 +1,6 @@
 # Scan results - never commit these
 output/
+runs/
 *.db
 *.sqlite
 *.sqlite3
@@ -10,7 +11,8 @@ scope.txt
 *.scope.txt
 targets.txt
 
-# Webhooks and secrets
+# Local configuration and secrets
+reconflow.toml
 .env
 webhook.txt
 webhook.json
@@ -24,6 +26,7 @@ venv/
 dist/
 build/
 *.egg-info/
+*.egg-info
 .pytest_cache/
 
 # Editors / OS

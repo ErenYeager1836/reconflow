@@ -1,8 +1,11 @@
 """Tests for Round 4 analysis features: takeover detection, JS mining, and lead scoring."""
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
-from reconflow import leads, mining, takeover
+from reconflow import db, leads, mining, report, takeover
 
 
 class TestSubdomainTakeover(unittest.TestCase):
@@ -117,6 +120,85 @@ class TestJSMining(unittest.TestCase):
         self.assertEqual(len(js_urls), 2)
         self.assertIn("https://example.com/app.js", js_urls)
         self.assertIn("https://example.com/main.js?v=1.2", js_urls)
+
+    def test_fake_aws_key_never_stored_or_exported_in_plaintext(self):
+        """Verify fake AWS key through mining, database storage, and reports is never raw."""
+        fake_key = "AKIAIOSFODNN7EXAMPLE"
+        js = f'const AWS_KEY = "{fake_key}";'
+
+        # 1. Mining
+        mined = mining.mine_js_content(js)
+        self.assertEqual(len(mined["secrets"]), 1)
+        masked_val = mined["secrets"][0]["masked"]
+        self.assertEqual(masked_val, "AKIA****************")
+        self.assertNotIn("EXAMPLE", masked_val)
+        self.assertNotIn(fake_key, masked_val)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            domain = "example.com"
+            run_id = "test_run_secrets"
+
+            # 2. Database storage
+            db_path = out_dir / "reconflow.db"
+            findings = [
+                {
+                    "template_id": "exposed-aws-key",
+                    "name": "Exposed AWS Access Key",
+                    "severity": "high",
+                    "host": "api.example.com",
+                    "matched_at": "https://api.example.com/app.js",
+                    "matcher_name": "aws-access-key-id",
+                    "description": f"Exposed secret: {masked_val}",
+                }
+            ]
+            db.save_findings(db_path, domain, run_id, findings)
+            live_hosts = [
+                {
+                    "url": "https://api.example.com",
+                    "subdomain": "api.example.com",
+                    "ip": "93.184.216.34",
+                    "status_code": 200,
+                    "title": f"API Portal [{masked_val}]",
+                }
+            ]
+            db.save_hosts(db_path, domain, run_id, live_hosts)
+
+            # Assert (a): SQLite DB contains no raw key
+            db_bytes = db_path.read_bytes().decode("latin1", errors="ignore")
+            self.assertNotIn(fake_key, db_bytes)
+            persisted_findings = db.get_findings(db_path, domain)
+            self.assertEqual(len(persisted_findings), 1)
+            self.assertIn("AKIA****************", persisted_findings[0]["description"])
+            self.assertNotIn(fake_key, persisted_findings[0]["description"])
+
+            # 3. Reports
+            # Assert (b): JSON report
+            json_dict = report.build_json_report(
+                domain, run_id, "2026-10-31", ["api.example.com"], live_hosts
+            )
+            json_str = json.dumps(json_dict)
+            self.assertNotIn(fake_key, json_str)
+            self.assertIn("AKIA****************", json_str)
+
+            # Assert (c): Markdown report
+            md_str = report.build_markdown_report(
+                domain, run_id, "2026-10-31", ["api.example.com"], live_hosts
+            )
+            self.assertNotIn(fake_key, md_str)
+            self.assertIn("AKIA****************", md_str)
+
+            # Assert (d): CSV report
+            csv_path = report.export_csv(domain, live_hosts, out_dir)
+            csv_str = csv_path.read_text(encoding="utf-8")
+            self.assertNotIn(fake_key, csv_str)
+            self.assertIn("AKIA****************", csv_str)
+
+            # Assert (e): SARIF report
+            sarif_path = report.export_sarif(domain, findings, out_dir)
+            sarif_str = sarif_path.read_text(encoding="utf-8")
+            self.assertNotIn(fake_key, sarif_str)
+            self.assertIn("AKIA****************", sarif_str)
 
 
 class TestLeadScoring(unittest.TestCase):
