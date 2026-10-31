@@ -195,6 +195,34 @@ class TestRateLimitingAndThreads(unittest.TestCase):
         self.assertIn("-rate-limit", cmd)
         self.assertIn("20", cmd)
 
+    def test_default_rate_limit_and_unlimited(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            # Default rate is 50 when not specified
+            pipeline_def = Pipeline(domain="example.com", output_dir=out_dir, rate=None)
+            self.assertEqual(pipeline_def.context.rate, 50)
+
+            # Test dry run output shows 50 req/s
+            with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+                pipeline_def.dry_run_plan()
+                self.assertIn("Rate Limit:    50 req/s", mock_stdout.getvalue())
+
+            # Test rate 0 means unlimited
+            pipeline_unlimited = Pipeline(domain="example.com", output_dir=out_dir, rate=0)
+            self.assertEqual(pipeline_unlimited.context.rate, 0)
+            with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+                pipeline_unlimited.dry_run_plan()
+                self.assertIn("Rate Limit:    unlimited", mock_stdout.getvalue())
+
+            # Test tools build commands without rate flags when rate=0
+            subfinder = SubfinderPlugin()
+            cmd = subfinder.build_command("example.com", rate=0)
+            self.assertNotIn("-rl", cmd)
+
+            httpx = HttpxPlugin()
+            cmd_h = httpx.build_command("subs.txt", rate=0)
+            self.assertNotIn("-rate-limit", cmd_h)
+
 
 class TestNucleiSafeguards(unittest.TestCase):
     """Test default safe templates vs intrusive flags and warnings."""

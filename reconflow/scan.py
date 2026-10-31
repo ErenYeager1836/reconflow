@@ -540,7 +540,12 @@ def _run_scan(args):
     timeout_raw = getattr(args, "timeout", None)
     timeout = timeout_raw if isinstance(timeout_raw, int) else 5
     rate_raw = getattr(args, "rate", None)
-    rate = rate_raw if isinstance(rate_raw, int) else None
+    if rate_raw is None:
+        rate = 50
+    elif isinstance(rate_raw, int):
+        rate = rate_raw
+    else:
+        rate = 50
     dry_run = getattr(args, "dry_run", False) is True
     resume = getattr(args, "resume", False) is True
     intrusive = (

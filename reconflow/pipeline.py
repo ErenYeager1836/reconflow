@@ -160,7 +160,7 @@ class PipelineContext:
     output_dir: Path
     stages: List[str] = field(default_factory=list)
     threads: int = 10
-    rate: Optional[int] = None
+    rate: Optional[int] = 50
     timeout: Optional[int] = None
     silent: bool = False
     dry_run: bool = False
@@ -196,6 +196,9 @@ class Pipeline:
         intrusive: bool = False,
         scope_data: Optional[Dict[str, Any]] = None,
     ):
+        if rate is None:
+            rate = 50
+
         if scope_data is None:
             from . import scope
             scope_data = scope.make_default_scope(domain)
@@ -219,7 +222,12 @@ class Pipeline:
         out_dir = self.context.output_dir
         stages = self.context.stages
         threads = self.context.threads or 10
-        rate_str = f"{self.context.rate} req/s" if self.context.rate else "unconstrained"
+        if self.context.rate == 0:
+            rate_str = "unlimited"
+        elif self.context.rate:
+            rate_str = f"{self.context.rate} req/s"
+        else:
+            rate_str = "unlimited"
         intrusive_str = (
             "ENABLED (Aggressive)" if self.context.intrusive else "Disabled (Safe only)"
         )

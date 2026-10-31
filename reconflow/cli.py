@@ -98,7 +98,7 @@ def build_parser():
         "--rate",
         type=int,
         default=None,
-        help="Rate limit in requests per second for supported tools (e.g. 50)",
+        help="Rate limit in req/s for supported tools (default: 50, use 0 for unlimited)",
     )
     p_scan.add_argument(
         "--dry-run",

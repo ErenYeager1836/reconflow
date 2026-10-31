@@ -55,7 +55,7 @@ reconflow does not reinvent reconnaissance tools; it orchestrates them safely as
 - **Toolchain Diagnostics (`doctor`)**: Inspects installed external binaries, versions, paths, and provides installation hints for missing ones.
 - **Modular Pipeline**: Six canonical stages (`subdomains -> dns -> http -> urls -> ports -> vulns`). Filter stages via `--stages` or `--skip`.
 - **Hard Scope Enforcement**: Universal scope gate drops out-of-scope hosts and IPs before executing any tool. Fail-closed scope design.
-- **Polite & Safe Scanning**: Rate limiting (`--rate`), thread limits (`--threads`), and safe vulnerability scanning defaults. Nuclei runs safe checks by default; aggressive templates require `--intrusive` or `--all-vulns`.
+- **Polite & Safe Scanning**: Rate limiting (`--rate`, default: 50 req/s, use 0 for unlimited), thread limits (`--threads`), and safe vulnerability scanning defaults. Nuclei runs safe checks by default; aggressive templates require `--intrusive` or `--all-vulns`.
 - **Dry Run & Resume**: Preview execution plans with `--dry-run`. Resume interrupted scans with `--resume` to skip already completed stages.
 - **State & Differential Tracking (`diff`)**: Target SQLite database (`output/<domain>/reconflow.db`) tracks historical runs and surfaces what is NEW: subdomains, live hosts, open ports, endpoints, and vulnerability findings.
 - **Analysis & Heuristics**: Subdomain takeover detection (marked conservatively as `"candidate, verify manually"`), JS endpoint and secret mining with **strictly masked previews** (`AKIA****************`), and lead scoring.
@@ -163,7 +163,7 @@ reconflow scan example.com --stages vulns --intrusive
 | `--scope` | Path to scope file (drops out-of-scope targets before tool execution) |
 | `--stages` | Comma-separated list of stages to run (`subdomains`, `dns`, `http`, `urls`, `ports`, `vulns`) |
 | `--skip` | Comma-separated list of stages to skip |
-| `--rate` | Rate limit in requests per second for supported tools |
+| `--rate` | Rate limit in requests per second for supported tools (default: 50, use 0 for unlimited) |
 | `--threads` | Concurrency / thread count for external tools |
 | `--timeout` | HTTP timeout in seconds (default: 5) |
 | `--dry-run` | Display pipeline stages and exact commands without executing them |
