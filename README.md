@@ -2,51 +2,108 @@
 
 [![PyPI](https://img.shields.io/pypi/v/reconflow)](https://pypi.org/project/reconflow/)
 
-Reconnaissance tool for bug bounty hunters that tracks **what changed** between scans. Chains [subfinder](https://github.com/projectdiscovery/subfinder) and [httpx](https://github.com/projectdiscovery/httpx) into a single automated pipeline, detects and filters out wildcard DNS noise, snapshots every target run, and highlights new subdomains, newly live hosts, and status changes with actionable lead hints.
+Reconnaissance orchestrator for bug bounty hunters that tracks **what changed** between scans. Orchestrates industry-standard external tools into a safe, automated pipeline, enforces strict program scope at every stage, records target state in SQLite, and highlights **new subdomains**, **new live hosts**, **new open ports**, **new endpoints**, and **new findings** with actionable lead hints.
 
 ```bash
 pip install reconflow
-reconflow scan example.com
+reconflow doctor
+reconflow scan example.com --scope scope.txt
 reconflow diff example.com
 ```
 
 > **Use responsibly.** Only scan domains you own or that are explicitly in scope for a bug bounty / pentest program you are authorized to test.
 
+---
+
+## Architecture
+
+reconflow does not reinvent reconnaissance tools; it orchestrates them safely as external binaries, normalizes their outputs into SQLite, and detects changes over time:
+
+```
++-------------------------------------------------------------------------+
+|                                reconflow                                |
+|                         Orchestration Pipeline                          |
++-------------------------------------------------------------------------+
+       |
+       +--> [1. subdomains] : subfinder (with strict scope filtering)
+       |
+       +--> [2. dns]        : dnsx / wildcard DNS detection
+       |
+       +--> [3. http]       : httpx (live status, tech, titles)
+       |
+       +--> [4. urls]       : katana / gau / waybackurls
+       |
+       +--> [5. ports]      : naabu (in-scope host port scanning)
+       |
+       +--> [6. vulns]      : nuclei (safe by default / --intrusive)
+       |
+       v
++-------------------------------------------------------------------------+
+|  State Ledger (SQLite) & Snapshot History (output/<domain>/reconflow.db)|
++-------------------------------------------------------------------------+
+       |
+       +--> Analysis  : Takeover detection, JS endpoint & masked secret mining
+       +--> Diffing   : What is NEW (ports, endpoints, findings, hosts)
+       +--> Reporting : Markdown, CSV, JSON, and SARIF v2.1.0
+       +--> Webhook   : Concise alert digest for Discord / Slack
+```
+
+---
+
 ## Features
 
-- **`scan`**: finds subdomains, drops wildcard DNS false positives (including rotating IP pools), probes live hosts for status code, title and technologies, and writes a Markdown report
-- **`diff`**: compares your two most recent scans of a domain and highlights what's new
-- **Scan history**: every scan saves a structured snapshot, so nothing is overwritten
-- **Cron-friendly**: `diff` exits `1` when something changed and `0` when nothing did
-- No Python dependencies beyond the standard library
+- **Toolchain Diagnostics (`doctor`)**: Inspects installed external binaries, versions, paths, and provides installation hints for missing ones.
+- **Modular Pipeline**: Six canonical stages (`subdomains -> dns -> http -> urls -> ports -> vulns`). Filter stages via `--stages` or `--skip`.
+- **Hard Scope Enforcement**: Universal scope gate drops out-of-scope hosts and IPs before executing any tool. Fail-closed scope design.
+- **Polite & Safe Scanning**: Rate limiting (`--rate`), thread limits (`--threads`), and safe vulnerability scanning defaults. Nuclei runs safe checks by default; aggressive templates require `--intrusive` or `--all-vulns`.
+- **Dry Run & Resume**: Preview execution plans with `--dry-run`. Resume interrupted scans with `--resume` to skip already completed stages.
+- **State & Differential Tracking (`diff`)**: Target SQLite database (`output/<domain>/reconflow.db`) tracks historical runs and surfaces what is NEW: subdomains, live hosts, open ports, endpoints, and vulnerability findings.
+- **Analysis & Heuristics**: Subdomain takeover detection (marked conservatively as `"candidate, verify manually"`), JS endpoint and secret mining with **strictly masked previews** (`AKIA****************`), and lead scoring.
+- **Multi-Format Reporting**: Export reports to Markdown, CSV, JSON, and SARIF v2.1.0 (`--format sarif`).
+- **Configuration**: Global and local configuration via `reconflow.toml`.
 
-## Requirements
+---
+
+## Toolchain & Requirements
 
 - Python 3.8+
-- [`subfinder`](https://github.com/projectdiscovery/subfinder/releases) and [`httpx`](https://github.com/projectdiscovery/httpx/releases) (ProjectDiscovery's Go versions) on your `PATH`
-- [`gowitness`](https://github.com/sensepost/gowitness/releases) (optional, only for `--screenshots`; **gowitness v3+ required**, as v2 legacy flags do not support `gowitness scan file`)
+- Supported external tools (each optional; missing tools skip their stage gracefully):
+  - [`subfinder`](https://github.com/projectdiscovery/subfinder): Subdomain enumeration
+  - [`httpx`](https://github.com/projectdiscovery/httpx): Live HTTP probing & technology detection
+  - [`dnsx`](https://github.com/projectdiscovery/dnsx): Fast multi-purpose DNS toolkit
+  - [`naabu`](https://github.com/projectdiscovery/naabu): Fast port scanner
+  - [`katana`](https://github.com/projectdiscovery/katana): Next-generation web crawler
+  - [`gau`](https://github.com/lc/gau): Fetch known URLs from AlienVault, Wayback, Common Crawl
+  - [`waybackurls`](https://github.com/tomnomnom/waybackurls): Fetch URLs from the Wayback Machine
+  - [`nuclei`](https://github.com/projectdiscovery/nuclei): Fast vulnerability scanner
+  - [`gowitness`](https://github.com/sensepost/gowitness): Screenshot generator (v3+ required)
 
-> **Note:** `httpx` must be ProjectDiscovery's tool, not the Python `httpx` library. On Kali/Debian/Ubuntu it is often packaged as `httpx-toolkit`. reconflow checks for both names and verifies the binary.
+Run the doctor command to verify your toolchain:
 
-Install Go tools directly with `go install`:
+```bash
+reconflow doctor
+```
+
+Install ProjectDiscovery tools via Go:
 
 ```bash
 go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
+go install -v github.com/projectdiscovery/katana/cmd/katana@latest
+go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+go install -v github.com/lc/gau/v2/cmd/gau@latest
+go install -v github.com/tomnomnom/waybackurls@latest
 ```
 
-Check your tools:
+---
 
-```
-subfinder -version
-httpx -version
-```
-
-## Install
+## Installation
 
 From PyPI:
 
-```
+```bash
 pip install reconflow
 ```
 
@@ -58,31 +115,95 @@ cd reconflow
 pip install -e .
 ```
 
+---
+
 ## Usage
 
+### 1. Toolchain Check (`doctor`)
+
+Check installed external binaries, their versions, and installation hints:
+
+```bash
+reconflow doctor
 ```
-reconflow scan example.com
+
+### 2. Scanning (`scan`)
+
+Run a full or customized recon scan against an in-scope domain:
+
+```bash
+# Standard scan (subdomains -> dns -> http)
 reconflow scan example.com --scope scope.txt
-reconflow diff example.com
-reconflow scope scope.txt api.example.com notexample.com
+
+# Run specific pipeline stages
+reconflow scan example.com --stages subdomains,http,urls
+
+# Skip port scanning or intrusive vulnerability tests
+reconflow scan example.com --skip ports,vulns
+
+# Polite rate limiting and threads
+reconflow scan example.com --rate 30 --threads 10
+
+# Dry-run mode (prints execution plan without running external commands)
+reconflow scan example.com --dry-run
+
+# Resume an interrupted scan (skips completed stages)
+reconflow scan example.com --resume
+
+# Enable aggressive vulnerability templates (warns on stderr)
+reconflow scan example.com --stages vulns --intrusive
 ```
 
-You can also run it as a module: `python -m reconflow scan example.com`
-
-### `scan`
+#### `scan` Options
 
 | Option | Description |
 | --- | --- |
 | `domain` | Target domain (required, must be in scope) |
 | `-o`, `--output` | Output folder (default: `output`) |
-| `--threads` | Number of threads for probing (default: 10) |
-| `--timeout` | Timeout in seconds for probing (default: 5) |
+| `--scope` | Path to scope file (drops out-of-scope targets before tool execution) |
+| `--stages` | Comma-separated list of stages to run (`subdomains`, `dns`, `http`, `urls`, `ports`, `vulns`) |
+| `--skip` | Comma-separated list of stages to skip |
+| `--rate` | Rate limit in requests per second for supported tools |
+| `--threads` | Concurrency / thread count for external tools |
+| `--timeout` | HTTP timeout in seconds (default: 5) |
+| `--dry-run` | Display pipeline stages and exact commands without executing them |
+| `--resume` | Resume previous incomplete scan run, skipping completed stages |
+| `--intrusive`, `--all-vulns` | Enable aggressive/intrusive templates in vulnerability scanning |
+| `-c`, `--config` | Path to custom `reconflow.toml` config file |
+| `-q`, `--quiet`, `--silent` | Show only discovered targets/URLs on stdout; send progress to stderr |
+| `--screenshots` | Capture screenshots of live hosts using gowitness |
 | `--keep-wildcard` | Warn about wildcard DNS but don't filter wildcard results |
-| `--json` | Also write structured results to `report.json` |
-| `--screenshots` | Capture screenshots of live hosts (requires gowitness) |
-| `--scope` | Path to scope file (drops out-of-scope hosts before network activity) |
+| `--json` | Write structured results to `report.json` |
+| `--csv` | Write live host data to `report.csv` |
 
-### `scope`
+---
+
+### 3. Track Changes (`diff`)
+
+Compare the two most recent scans for a domain to surface what is **NEW**:
+
+```bash
+reconflow diff example.com
+
+# Emit JSON diff
+reconflow diff example.com --json
+
+# Send notification digest to Discord or Slack on changes
+reconflow diff example.com --notify
+```
+
+`diff` reports:
+- Newly discovered subdomains
+- Newly live HTTP hosts with lead hints
+- Newly opened ports
+- Newly discovered endpoints and URLs
+- Newly surfaced vulnerability findings
+
+Exit code is `1` if changes were detected and `0` if no changes occurred, making it ideal for cron automation.
+
+---
+
+### 4. Scope Verification (`scope`)
 
 Verify whether targets are in or out of scope based on a program scope file:
 
@@ -90,32 +211,37 @@ Verify whether targets are in or out of scope based on a program scope file:
 reconflow scope scope.txt api.example.com admin.example.com 192.168.1.10
 ```
 
-#### Scope file format & matching rules
-- One entry per line; blank lines and `#` comments are ignored.
-- **In-scope entries**: exact domains (`example.com`), wildcards (`*.example.com`), and IP/CIDR blocks (`192.168.1.0/24`).
-- **Out-of-scope entries**: prefixed with `!`, `-`, or `out:` (e.g. `!admin.example.com`, `!10.0.0.0/8`).
-- **Out-of-scope entries ALWAYS override in-scope entries**.
-- **Wildcard matching**: `*.example.com` matches subdomains only (e.g. `api.example.com`, `dev.api.example.com`). It does **NOT** match the apex domain `example.com` itself and does **NOT** match `notexample.com`. The apex domain must be listed explicitly if in scope.
-- **Normalization**: Hostnames are normalized first (lowercased; schemes, credentials, ports, paths, and trailing dots are stripped).
-- **Fail closed**: If `--scope` is given and the file is missing, unreadable, empty, or contains no valid in-scope entries, reconflow aborts immediately. Out-of-scope hosts and redirect targets are never probed.
+#### Scope Rules
+- Exact hosts (`example.com`), wildcards (`*.example.com`), and CIDR blocks (`10.0.0.0/8`).
+- Out-of-scope lines prefixed with `!`, `-`, or `out:` (e.g. `!admin.example.com`).
+- **Out-of-scope rules always take precedence** over in-scope rules.
+- Out-of-scope targets are dropped before invoking external binaries.
 
-> **Browser Redirects & Scope**: `gowitness` captures screenshots in a real headless browser, which automatically follows HTTP redirects. `reconflow` protects your scope boundaries by capturing HTTP redirect targets (`Location` headers) via `httpx` in all modes and automatically skipping screenshots for any host that redirects to an out-of-scope destination. Note that client-side JavaScript redirects (e.g. `window.location`) or HTML `<meta http-equiv="refresh">` redirects execute inside the browser engine and cannot be detected beforehand.
+---
 
-### `diff`
+### 5. Multi-Format Reporting (`report`)
 
-| Option | Description |
-| --- | --- |
-| `domain` | Target domain to compare runs for (required) |
-| `-o`, `--output` | Output folder (default: `output`) |
-| `--json` | Print the comparison as JSON |
-| `--notify` | Send webhook alert to Discord or Slack if changes are detected |
-| `--webhook-url` | Webhook URL (or set `RECONFLOW_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL` / `SLACK_WEBHOOK_URL`) |
+Regenerate reports from saved scan snapshots in Markdown, CSV, JSON, or SARIF v2.1.0:
 
-`diff` needs at least two saved scans of the same domain. Run `scan` twice first.
+```bash
+# Markdown report (default)
+reconflow report example.com
 
-### `mark`
+# SARIF v2.1.0 format (for GitHub Security Code Scanning)
+reconflow report example.com --format sarif
 
-Set triage state for a host on a per-domain basis so reviewed assets stop cluttering differential scans:
+# CSV export
+reconflow report example.com --format csv
+
+# Specific run ID
+reconflow report example.com --run 2026-10-31_153000 --format json
+```
+
+---
+
+### 6. Host Triage (`mark`)
+
+Mark hosts as tested or ignored so reviewed assets stop cluttering differential scans:
 
 ```bash
 # Mark host as reviewed and tested
@@ -124,169 +250,82 @@ reconflow mark admin.example.com --tested
 # Mark host to be ignored in subsequent diffs
 reconflow mark dev-api.example.com --ignore --notes "Mock API for testing"
 
-# List all triaged hosts for a domain
+# List triaged hosts
 reconflow mark --list -d example.com
 ```
 
-| Option | Description |
-| --- | --- |
-| `host` | Hostname or URL to mark |
-| `-d`, `--domain` | Target domain (inferred if omitted) |
-| `-o`, `--output` | Output folder (default: `output`) |
-| `--tested` | Mark host as tested |
-| `--ignore` | Mark host as ignored |
-| `--notes` | Optional notes on the triage decision |
-| `--list` | List all triaged hosts for domain |
+---
 
-> **Triage Behavior**:
-> - `--ignore`: Permanently silences the host from appearing in `new_live` and `changed` sections in subsequent diffs.
-> - `--tested`: Hides the host from `new_live` once reviewed, but if the host later undergoes a change (e.g. status code changes from 403 to 200, title changes, or new technology is detected), it automatically resurfaces under `changed` so you never miss critical updates.
+## Configuration (`reconflow.toml`)
 
-### `report`
+reconflow automatically checks `./reconflow.toml` and `~/.config/reconflow/reconflow.toml`. CLI flags always take precedence over configuration defaults.
 
-Regenerate Markdown (`report.md`) and JSON (`report.json`) reports from an existing scan snapshot without re-running any network discovery or probing:
+```toml
+[general]
+output = "output"
+threads = 20
+timeout = 5
+rate = 50
+
+[pipeline]
+stages = ["subdomains", "dns", "http", "urls"]
+skip = ["ports"]
+
+[templates]
+exclude_tags = ["dos", "fuzz"]
+
+[notify]
+webhook_url = "https://discord.com/api/webhooks/..."
+```
+
+---
+
+## Output Structure
+
+Results are stored per target in `output/<domain>/`:
+
+```
+output/<domain>/
+├── reconflow.db        # SQLite database tracking runs, hosts, ports, URLs, findings
+├── subdomains.txt      # Discovered in-scope subdomains
+├── live.txt            # Live probed HTTP services
+├── urls.txt            # Crawled & archived endpoints
+├── ports.json          # Open ports discovered by naabu
+├── vulns.json          # Vulnerability findings from nuclei
+├── report.md           # Markdown summary report
+├── report.json         # JSON structured report
+├── report.csv          # CSV host spreadsheet
+├── report.sarif        # SARIF v2.1.0 finding report
+├── triage.json         # Marked host triage states
+├── screenshots/        # Live host screenshots (with --screenshots)
+└── runs/<run_id>/      # Immutable snapshot for each scan run
+```
+
+---
+
+## UNIX Pipelines (`--quiet`)
+
+Pass `-q`, `--quiet`, or `--silent` to keep stdout clean and machine-readable:
 
 ```bash
-# Regenerate report from the latest scan
-reconflow report example.com
-
-# Regenerate report for a specific historical scan run
-reconflow report example.com --run 2026-10-18_185218
-
-# Output structured report as JSON
-reconflow report example.com --json
+reconflow scan example.com --quiet | sort -u > targets.txt
 ```
 
-| Option | Description |
-| --- | --- |
-| `domain` | Target domain to generate report for (required) |
-| `-o`, `--output` | Output folder (default: `output`) |
-| `--run` | Specific scan run ID (defaults to latest scan) |
-| `--json` | Print the regenerated report as JSON |
+Progress and diagnostics go to stderr, while stdout outputs discovered live HTTP URLs (or subdomains).
 
-## Track changes with `diff`
-
-Most recon tools tell you what exists. reconflow also tells you what changed. New subdomains, newly live hosts, and status transitions are annotated with actionable **lead hints** ("worth checking"):
-
-> **Illustrative example output** (simulated demonstration, not from a real scan):
-<!-- TODO: Replace illustrative sample diff output below with real output from an authorized scan run -->
-
-```
-[*] Recon diff: 2026-10-18_185218 -> 2026-10-18_190412
-============================================================
-[+] NEW SUBDOMAINS (2):
-    + beta.example.com
-    + staging-api.example.com
-[+] NEWLY LIVE HOSTS (1):
-    + https://beta.example.com [200] [Beta Portal] [Nginx, React]
-        * Worth checking: Prerelease beta environment; look for unhardened endpoints or debug flags.
-[*] CHANGED HOSTS (1):
-    ~ https://admin.example.com
-        status: 403 -> 200
-        title: 'Forbidden' -> 'Admin Login'
-        tech: ['Apache'] -> ['Apache', 'PHP']
-        * Worth checking: Status changed from 403 to 200; previously protected resource is now publicly accessible.
-        * Worth checking: Administrative interface; test for panel access, auth bypass, or default credentials.
-[-] Removed subdomains (1) [informational]:
-    - old.example.com
-============================================================
-```
-
-> **Incomplete Scan Safeguards**: If a previous or current scan was interrupted (Ctrl+C), missing hosts are never reported as "gone" or removed, and a warning is displayed instead.
-
-### Exit codes
-
-| Code | Meaning |
-| --- | --- |
-| `0` | No changes found (or not enough history to compare) |
-| `1` | Changes were detected |
-
-### Webhook Alerts & Scheduled Automation
-
-Send alerts to Discord or Slack only when new hosts or changes are detected:
-
-```bash
-# Set webhook in environment (recommended: avoids exposing secrets in shell history or ps)
-export RECONFLOW_WEBHOOK_URL="https://discord.com/api/webhooks/..."
-
-# Every 6 hours: rescan, diff, and notify on changes
-0 */6 * * * reconflow scan example.com && reconflow diff example.com --notify >> ~/recon-changes.log
-```
-
-> **Security Note**: Using the `RECONFLOW_WEBHOOK_URL` (or `DISCORD_WEBHOOK_URL` / `SLACK_WEBHOOK_URL`) environment variable is strongly recommended over `--webhook-url` to prevent sensitive tokens from appearing in shell history (`.bash_history`) or process listings (`ps aux`).
-
-## Output
-
-Files are saved under `output/<domain>/`:
-
-```
-subdomains.txt      all discovered subdomains
-live.txt            live hosts with status code, title, tech
-report.md           summary report
-report.json         structured report (with --json)
-triage.json         triage records (with reconflow mark)
-screenshots/        screenshots of live hosts (with --screenshots)
-runs/<run_id>/      snapshot of each scan, used by diff
-```
-
-## Known limitations
-
-- **Wildcard DNS domains** return many fake "live" hosts that all point to the same server. reconflow detects them and filters those hosts (use `--keep-wildcard` to disable).
-- Discovery depends on subfinder's sources, so results can vary between runs.
-
-## Roadmap
-
-- [x] Subdomain discovery and live host probing
-- [x] Wildcard DNS detection (including rotating IP pools)
-- [x] `--threads` and `--timeout` options
-- [x] JSON report output
-- [x] Screenshots of live hosts
-- [x] Scan history and `reconflow diff`
-- [x] `reconflow scope`: check targets against program scope
-- [x] `reconflow report`: regenerate reports from saved scans
-- [x] Lead hints in `reconflow diff`
-- [x] `--notify`: Discord/Slack webhook alerts for diff results
-- [x] Triage state: `reconflow mark <host> --tested|--ignore`
-- [x] Save results as they come in
+---
 
 ## Contributing
 
-Contributions are welcome. Look for issues labelled `good first issue`. Run the tests with:
+Contributions are welcome! Run tests and linting with:
 
-```
+```bash
 python -m unittest discover tests -v
+flake8 reconflow tests --max-line-length=100 --ignore=E203,W503,W504
 ```
+
+---
 
 ## License
 
 MIT
-
-<<<<<<< HEAD
-## CSV reports
-
-Use `--csv` on a scan to generate a spreadsheet-compatible `report.csv` alongside
-`report.md` under `output/<domain>/`:
-
-```sh
-python -m reconflow scan example.com --csv
-python -m reconflow scan example.com --csv --json --output my-results
-```
-
-The CSV contains `subdomain`, `ip`, `status_code`, `title`, `technologies`,
-`cname`, and `takeover_risk` columns. Existing probe results primarily include
-URLs, status, title and technology names. The exporter extracts the subdomain
-from the URL, joins technology names with semicolons, and leaves fields blank
-when the scanner did not collect them. An empty scan still writes the header.
-All CSV quoting is handled by Python's standard `csv` module; no extra
-packages are required.
-=======
-## Quiet output for UNIX pipelines
-
-Pass `-q`, `--quiet`, or `--silent` to the `scan` command to keep stdout machine-readable:
-
-```sh
-python -m reconflow scan example.com --quiet | sort -u > targets.txt
-```
-
-Progress and scan diagnostics go to stderr, while stdout contains the discovered live HTTP(S) URLs (one per line); if no live hosts were found, the discovered subdomains are emitted instead. The ordinary Markdown report, run snapshots and optional `--json` report file are still written. Without the flag, the normal human-readable progress output is unchanged. This mode does not initiate any additional scanning beyond the regular `scan` command.
->>>>>>> 60a12bb (feat(scan): support quiet pipeline output (#14))

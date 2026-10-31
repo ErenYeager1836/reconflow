@@ -1,0 +1,22 @@
+# reconflow.toml.example
+# Copy to reconflow.toml or ~/.config/reconflow/reconflow.toml
+
+[general]
+output = "output"
+threads = 20
+timeout = 5
+rate = 50
+
+[pipeline]
+# Default pipeline stages: subdomains, dns, http, urls, ports, vulns
+stages = ["subdomains", "dns", "http"]
+# Stages to skip by default:
+# skip = ["ports", "vulns"]
+
+[templates]
+# Nuclei templates configuration
+exclude_tags = ["dos", "fuzz"]
+
+[notify]
+# Discord or Slack webhook URL
+# webhook_url = "https://discord.com/api/webhooks/..."
