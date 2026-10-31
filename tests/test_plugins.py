@@ -25,7 +25,8 @@ class TestToolPluginBase(unittest.TestCase):
 
     def test_run_command_safe_success(self):
         plugin = SubfinderPlugin()
-        code, stdout, stderr = plugin.run_command_safe([sys.executable, "-c", "print('hello recon')"])
+        cmd = [sys.executable, "-c", "print('hello recon')"]
+        code, stdout, stderr = plugin.run_command_safe(cmd)
         self.assertEqual(code, 0)
         self.assertEqual(stdout.strip(), "hello recon")
         self.assertEqual(stderr, "")
