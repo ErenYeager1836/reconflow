@@ -211,143 +211,153 @@ def probe_hosts(
     out_file.parent.mkdir(parents=True, exist_ok=True)
     out_file.write_text("", encoding="utf-8")
 
-    with open(out_file, "a", encoding="utf-8") as live_fh:
-        with subprocess.Popen(
-            cmd,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        ) as proc:
-            for line in proc.stdout:
-                stripped = line.strip()
-                if not stripped:
-                    continue
-                if json_report:
-                    try:
-                        data = json.loads(stripped)
-                        url = data.get("url") or ""
-                        final_url = data.get("final_url") or data.get("location")
+    proc = None
+    try:
+        with open(out_file, "a", encoding="utf-8") as live_fh:
+            with subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            ) as proc:
+                for line in proc.stdout:
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    if json_report:
+                        try:
+                            data = json.loads(stripped)
+                            url = data.get("url") or ""
+                            final_url = data.get("final_url") or data.get("location")
 
-                        if scope_data:
-                            from . import scope
+                            if scope_data:
+                                from . import scope
 
-                            if not scope.is_in_scope(url, scope_data):
-                                print(f"[*] [scope] Skipped out-of-scope probed host: {url}")
-                                continue
+                                if not scope.is_in_scope(url, scope_data):
+                                    print(f"[*] [scope] Skipped out-of-scope probed host: {url}")
+                                    continue
 
-                            if final_url:
-                                if not scope.is_in_scope(final_url, scope_data):
+                                if final_url:
+                                    if not scope.is_in_scope(final_url, scope_data):
+                                        print(
+                                            f"[*] [scope] Redirect target out of scope: "
+                                            f"{final_url} (from {url})"
+                                        )
+                                        data["redirect_out_of_scope"] = final_url
+                                        if data.get("url") == final_url:
+                                            data["url"] = url
+                                    else:
+                                        data["redirect_in_scope"] = final_url
+
+                            code = data.get("status_code", data.get("status-code", 0))
+                            title = data.get("title", "")
+                            tech = data.get("tech") or data.get("technologies") or []
+                            entry = {
+                                "url": url,
+                                "status_code": code,
+                                "title": title,
+                                "technologies": tech,
+                            }
+                            if "redirect_out_of_scope" in data:
+                                entry["redirect_out_of_scope"] = data["redirect_out_of_scope"]
+                            if "redirect_in_scope" in data:
+                                entry["redirect_in_scope"] = data["redirect_in_scope"]
+                            hosts_data.append(entry)
+                            display = f"{url} [{code}]"
+                            if title:
+                                display += f" [{title}]"
+                            if tech:
+                                tech_str = ", ".join(tech) if isinstance(tech, list) else tech
+                                display += f" [{tech_str}]"
+                            if "redirect_out_of_scope" in data:
+                                oos_target = data["redirect_out_of_scope"]
+                                display += f" [redirect out of scope: {oos_target}]"
+                            lines.append(display)
+                            live_fh.write(display + "\n")
+                            live_fh.flush()
+
+                            if run_dir:
+                                from . import history
+
+                                history.record_host(run_dir, entry)
+
+                            print(f"[*] [{len(lines)} alive] {display}")
+                        except json.JSONDecodeError:
+                            error_lines.append(stripped)
+                    else:
+                        if stripped.startswith("http://") or stripped.startswith("https://"):
+                            tokens = stripped.split()
+                            url = tokens[0]
+                            if scope_data:
+                                from . import scope
+
+                                if not scope.is_in_scope(url, scope_data):
+                                    print(f"[*] [scope] Skipped out-of-scope probed host: {url}")
+                                    continue
+
+                            import re
+
+                            redirect_url = None
+                            brackets = re.findall(r"\[(.*?)\]", stripped)
+                            for b in brackets:
+                                b_clean = b.strip()
+                                for prefix in ("location:", "->", "to:"):
+                                    if b_clean.lower().startswith(prefix):
+                                        b_clean = b_clean[len(prefix):].strip()
+                                if (
+                                    b_clean.startswith("http://") or b_clean.startswith("https://")
+                                ) and b_clean != url:
+                                    redirect_url = b_clean
+                                    break
+
+                            has_oos_redirect = False
+                            has_in_scope_redirect = False
+                            if redirect_url and scope_data:
+                                from . import scope
+
+                                if not scope.is_in_scope(redirect_url, scope_data):
                                     print(
                                         f"[*] [scope] Redirect target out of scope: "
-                                        f"{final_url} (from {url})"
+                                        f"{redirect_url} (from {url})"
                                     )
-                                    data["redirect_out_of_scope"] = final_url
-                                    if data.get("url") == final_url:
-                                        data["url"] = url
+                                    has_oos_redirect = True
                                 else:
-                                    data["redirect_in_scope"] = final_url
+                                    has_in_scope_redirect = True
 
-                        code = data.get("status_code", data.get("status-code", 0))
-                        title = data.get("title", "")
-                        tech = data.get("tech") or data.get("technologies") or []
-                        entry = {
-                            "url": url,
-                            "status_code": code,
-                            "title": title,
-                            "technologies": tech,
-                        }
-                        if "redirect_out_of_scope" in data:
-                            entry["redirect_out_of_scope"] = data["redirect_out_of_scope"]
-                        if "redirect_in_scope" in data:
-                            entry["redirect_in_scope"] = data["redirect_in_scope"]
-                        hosts_data.append(entry)
-                        display = f"{url} [{code}]"
-                        if title:
-                            display += f" [{title}]"
-                        if tech:
-                            tech_str = ", ".join(tech) if isinstance(tech, list) else tech
-                            display += f" [{tech_str}]"
-                        if "redirect_out_of_scope" in data:
-                            display += f" [redirect out of scope: {data['redirect_out_of_scope']}]"
-                        lines.append(display)
-                        live_fh.write(display + "\n")
-                        live_fh.flush()
+                            display = stripped
+                            if has_oos_redirect and "redirect out of scope:" not in display:
+                                display += f" [redirect out of scope: {redirect_url}]"
 
-                        if run_dir:
-                            from . import history
+                            entry = {"url": url}
+                            if has_oos_redirect:
+                                entry["redirect_out_of_scope"] = redirect_url
+                            if has_in_scope_redirect:
+                                entry["redirect_in_scope"] = redirect_url
+                            hosts_data.append(entry)
 
-                            history.record_host(run_dir, entry)
+                            lines.append(display)
+                            live_fh.write(display + "\n")
+                            live_fh.flush()
+                            if run_dir:
+                                from . import history
 
-                        print(f"[*] [{len(lines)} alive] {display}")
-                    except json.JSONDecodeError:
-                        error_lines.append(stripped)
-                else:
-                    if stripped.startswith("http://") or stripped.startswith("https://"):
-                        tokens = stripped.split()
-                        url = tokens[0]
-                        if scope_data:
-                            from . import scope
+                                history.record_host(run_dir, entry)
+                            print(f"[*] [{len(lines)} alive] {display}")
+                        else:
+                            error_lines.append(stripped)
+                proc.wait()
+    except FileNotFoundError:
+        print(
+            f"[!] Tool '{bin_name}' not found in PATH. Skipping HTTP probe stage.\n"
+            f"    Install: go install -v "
+            f"github.com/projectdiscovery/httpx/cmd/httpx@latest"
+        )
+        return [], []
 
-                            if not scope.is_in_scope(url, scope_data):
-                                print(f"[*] [scope] Skipped out-of-scope probed host: {url}")
-                                continue
-
-                        import re
-
-                        redirect_url = None
-                        brackets = re.findall(r"\[(.*?)\]", stripped)
-                        for b in brackets:
-                            b_clean = b.strip()
-                            for prefix in ("location:", "->", "to:"):
-                                if b_clean.lower().startswith(prefix):
-                                    b_clean = b_clean[len(prefix):].strip()
-                            if (
-                                b_clean.startswith("http://") or b_clean.startswith("https://")
-                            ) and b_clean != url:
-                                redirect_url = b_clean
-                                break
-
-                        has_oos_redirect = False
-                        has_in_scope_redirect = False
-                        if redirect_url and scope_data:
-                            from . import scope
-
-                            if not scope.is_in_scope(redirect_url, scope_data):
-                                print(
-                                    f"[*] [scope] Redirect target out of scope: "
-                                    f"{redirect_url} (from {url})"
-                                )
-                                has_oos_redirect = True
-                            else:
-                                has_in_scope_redirect = True
-
-                        display = stripped
-                        if has_oos_redirect and "redirect out of scope:" not in display:
-                            display += f" [redirect out of scope: {redirect_url}]"
-
-                        entry = {"url": url}
-                        if has_oos_redirect:
-                            entry["redirect_out_of_scope"] = redirect_url
-                        if has_in_scope_redirect:
-                            entry["redirect_in_scope"] = redirect_url
-                        hosts_data.append(entry)
-
-                        lines.append(display)
-                        live_fh.write(display + "\n")
-                        live_fh.flush()
-                        if run_dir:
-                            from . import history
-
-                            history.record_host(run_dir, entry)
-                        print(f"[*] [{len(lines)} alive] {display}")
-                    else:
-                        error_lines.append(stripped)
-            proc.wait()
-
-    if proc.returncode != 0:
+    if proc is not None and proc.returncode != 0:
         if error_lines:
             err_msg = "\n".join(error_lines)
             print(f"[!] httpx probing error (exit code {proc.returncode}):\n{err_msg}")
@@ -757,14 +767,6 @@ def _run_scan(args):
                     hosts_data = []
             elif "http" not in active_stages:
                 print("[*] Skipping HTTP probe stage")
-                live = []
-                hosts_data = []
-            elif not resolve_httpx_binary():
-                print(
-                    "[!] Tool 'httpx' not found in PATH. Skipping HTTP probe stage.\n"
-                    "    Install: go install -v "
-                    "github.com/projectdiscovery/httpx/cmd/httpx@latest"
-                )
                 live = []
                 hosts_data = []
             else:

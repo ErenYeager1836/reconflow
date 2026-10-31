@@ -168,7 +168,8 @@ class TestPluginImplementations(unittest.TestCase):
         self.assertEqual(records[0]["source"], "gau")
 
         # Test version extraction
-        with patch("subprocess.run") as mock_run:
+        with patch.object(p, "is_installed", return_value=True), \
+             patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(stdout="gau version: 2.2.4\n", stderr="")
             self.assertEqual(p.get_version(), "v2.2.4")
 
