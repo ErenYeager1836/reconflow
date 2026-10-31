@@ -34,6 +34,13 @@ def init_run(out_dir: Path, domain: str = ""):
     )
 
     (run_dir / "scan.jsonl").touch(exist_ok=True)
+    try:
+        from . import db
+
+        db_path = out_dir / "reconflow.db"
+        db.record_run_start(db_path, run_id, domain)
+    except Exception:
+        pass
     return run_id, run_dir
 
 
@@ -55,8 +62,17 @@ def record_host(run_dir: Path, host_data: dict):
         f.flush()
 
 
-def finalize_run(run_dir: Path, subs, hosts, domain: str = ""):
-    """Mark scan run as complete and write final snapshot.json."""
+def finalize_run(
+    run_dir: Path,
+    subs,
+    hosts,
+    domain: str = "",
+    urls=None,
+    ports=None,
+    findings=None,
+    stages_completed=None,
+):
+    """Mark scan run as complete and write final snapshot.json and SQLite db."""
     snapshot_file = run_dir / "snapshot.json"
     run_id = run_dir.name
     timestamp = datetime.now().isoformat()
@@ -78,8 +94,31 @@ def finalize_run(run_dir: Path, subs, hosts, domain: str = ""):
         "incomplete": False,
         "subdomains": sorted(subs),
         "hosts": hosts or [],
+        "urls": urls or [],
+        "ports": ports or [],
+        "findings": findings or [],
+        "stages_completed": stages_completed or [],
     }
     snapshot_file.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    # Persist to target SQLite database
+    try:
+        from . import db
+
+        out_dir = run_dir.parent.parent
+        db_path = out_dir / "reconflow.db"
+        db.save_subdomains(db_path, domain, run_id, subs)
+        db.save_hosts(db_path, domain, run_id, hosts or [])
+        if urls:
+            db.save_urls(db_path, domain, run_id, urls)
+        if ports:
+            db.save_ports(db_path, domain, run_id, ports)
+        if findings:
+            db.save_findings(db_path, domain, run_id, findings)
+        db.record_run_complete(db_path, run_id, status="completed")
+    except Exception:
+        pass
+
     return run_id
 
 
@@ -177,5 +216,29 @@ def load_snapshot(run_dir: Path):
                 data["subdomains"] = sorted(jsonl_subs)
             if jsonl_hosts and not data.get("hosts"):
                 data["hosts"] = jsonl_hosts
+
+    # Ensure extended fields exist
+    if "urls" not in data:
+        data["urls"] = []
+    if "ports" not in data:
+        data["ports"] = []
+    if "findings" not in data:
+        data["findings"] = []
+
+    # If missing extended fields, check SQLite db
+    db_path = run_dir.parent.parent / "reconflow.db"
+    if db_path.exists() and (not data["urls"] or not data["ports"] or not data["findings"]):
+        try:
+            from . import db
+
+            db_data = db.get_run_data(db_path, data.get("run_id", run_dir.name))
+            if not data["urls"] and db_data.get("urls"):
+                data["urls"] = db_data["urls"]
+            if not data["ports"] and db_data.get("ports"):
+                data["ports"] = db_data["ports"]
+            if not data["findings"] and db_data.get("findings"):
+                data["findings"] = db_data["findings"]
+        except Exception:
+            pass
 
     return data

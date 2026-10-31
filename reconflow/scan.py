@@ -532,6 +532,7 @@ def _run_scan(args):
     rate_raw = getattr(args, "rate", None)
     rate = rate_raw if isinstance(rate_raw, int) else None
     dry_run = getattr(args, "dry_run", False) is True
+    resume = getattr(args, "resume", False) is True
     intrusive = (
         getattr(args, "intrusive", False) is True
         or getattr(args, "all_vulns", False) is True
@@ -610,11 +611,80 @@ def _run_scan(args):
 
     from . import history
 
-    run_id, run_dir = history.init_run(out_dir, domain=domain)
+    db_path = out_dir / "reconflow.db"
+    resuming = False
+    completed_stages = []
+    if resume and db_path.exists():
+        try:
+            from . import db
+
+            last_run = db.get_last_run(db_path, domain)
+            if last_run and last_run.get("status") == "running":
+                prev_run_id = last_run["id"]
+                prev_run_dir = out_dir / "runs" / prev_run_id
+                if prev_run_dir.exists():
+                    resuming = True
+                    run_id = prev_run_id
+                    run_dir = prev_run_dir
+                    completed_stages = list(last_run.get("stages_completed") or [])
+                    print(
+                        f"[*] Resuming previous incomplete run '{run_id}' "
+                        f"(completed stages: {', '.join(completed_stages) or 'none'})"
+                    )
+        except Exception:
+            pass
+
+    if not resuming:
+        run_id, run_dir = history.init_run(out_dir, domain=domain)
+        try:
+            from . import db
+
+            db.record_run_start(db_path, run_id, domain)
+        except Exception:
+            pass
 
     try:
-        if "subdomains" in active_stages:
+        subs = []
+        live = []
+        hosts_data = []
+        all_urls = []
+        port_records = []
+        vuln_records = []
+
+        if "subdomains" in completed_stages:
+            print("[*] Stage 'subdomains' already completed in resumed run. Loading cached.")
+            subs_file = out_dir / "subdomains.txt"
+            subs = (
+                [
+                    line.strip()
+                    for line in subs_file.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                ]
+                if subs_file.exists()
+                else []
+            )
+        elif "subdomains" in active_stages:
             subs = find_subdomains(domain, out_dir / "subdomains.txt")
+            if scope_data:
+                from .pipeline import filter_in_scope_targets
+
+                subs = filter_in_scope_targets(subs, scope_data)
+                (out_dir / "subdomains.txt").write_text(
+                    "\n".join(subs) + ("\n" if subs else ""), encoding="utf-8"
+                )
+
+            for s in subs:
+                history.record_subdomain(run_dir, s)
+
+            try:
+                from . import db
+
+                db.save_subdomains(db_path, domain, run_id, subs)
+                db.record_stage_completed(db_path, run_id, "subdomains")
+            except Exception:
+                pass
+            if "subdomains" not in completed_stages:
+                completed_stages.append("subdomains")
         else:
             print("[*] Skipping subdomain enum stage")
             subs_file = out_dir / "subdomains.txt"
@@ -627,17 +697,6 @@ def _run_scan(args):
                 if subs_file.exists()
                 else []
             )
-
-        if scope_data:
-            from .pipeline import filter_in_scope_targets
-
-            subs = filter_in_scope_targets(subs, scope_data)
-            (out_dir / "subdomains.txt").write_text(
-                "\n".join(subs) + ("\n" if subs else ""), encoding="utf-8"
-            )
-
-        for s in subs:
-            history.record_subdomain(run_dir, s)
 
         screenshots = []
         if not subs:
@@ -665,10 +724,37 @@ def _run_scan(args):
                         "\n".join(subs) + ("\n" if subs else ""), encoding="utf-8"
                     )
 
+            if "dns" in active_stages and "dns" not in completed_stages:
+                try:
+                    from . import db
+
+                    db.record_stage_completed(db_path, run_id, "dns")
+                except Exception:
+                    pass
+                completed_stages.append("dns")
+
             if not subs:
                 print("[!] No subdomains left to probe.")
                 live = []
                 hosts_data = []
+            elif "http" in completed_stages:
+                print("[*] Stage 'http' already completed in resumed run. Loading cached.")
+                live_file = out_dir / "live.txt"
+                live = (
+                    [
+                        line.strip()
+                        for line in live_file.read_text(encoding="utf-8").splitlines()
+                        if line.strip()
+                    ]
+                    if live_file.exists()
+                    else []
+                )
+                try:
+                    from . import db
+
+                    hosts_data = db.get_hosts(db_path, domain, run_id)
+                except Exception:
+                    hosts_data = []
             elif "http" not in active_stages:
                 print("[*] Skipping HTTP probe stage")
                 live = []
@@ -693,6 +779,16 @@ def _run_scan(args):
                     scope_data=scope_data,
                     run_dir=run_dir,
                 )
+                try:
+                    from . import db
+
+                    db.save_hosts(db_path, domain, run_id, hosts_data)
+                    db.record_stage_completed(db_path, run_id, "http")
+                except Exception:
+                    pass
+                if "http" not in completed_stages:
+                    completed_stages.append("http")
+
                 if screenshots_enabled and live:
                     screenshots = capture_screenshots(
                         live,
@@ -701,11 +797,19 @@ def _run_scan(args):
                         hosts_data=hosts_data,
                     )
 
-        if stages_arg is not None and "urls" in active_stages:
+        if "urls" in completed_stages:
+            print("[*] Stage 'urls' already completed in resumed run. Loading cached.")
+            urls_file = out_dir / "urls.txt"
+            if urls_file.exists():
+                all_urls = [
+                    line.strip()
+                    for line in urls_file.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                ]
+        elif stages_arg is not None and "urls" in active_stages:
             from .plugins import KatanaPlugin, GauPlugin, WaybackurlsPlugin
             from .pipeline import filter_in_scope_targets
 
-            all_urls = []
             for url_tool in [KatanaPlugin(), GauPlugin(), WaybackurlsPlugin()]:
                 if not url_tool.is_installed():
                     print(f"[*] Tool '{url_tool.name}' not found. Skipping in URL collection.")
@@ -731,8 +835,30 @@ def _run_scan(args):
                     "\n".join(deduped) + "\n", encoding="utf-8"
                 )
                 print(f"[+] Collected {len(deduped)} URLs")
+                try:
+                    from . import db
 
-        if stages_arg is not None and "ports" in active_stages and subs:
+                    db.save_urls(db_path, domain, run_id, deduped)
+                except Exception:
+                    pass
+            try:
+                from . import db
+
+                db.record_stage_completed(db_path, run_id, "urls")
+            except Exception:
+                pass
+            if "urls" not in completed_stages:
+                completed_stages.append("urls")
+
+        if "ports" in completed_stages:
+            print("[*] Stage 'ports' already completed in resumed run. Loading cached.")
+            ports_file = out_dir / "ports.json"
+            if ports_file.exists():
+                try:
+                    port_records = json.loads(ports_file.read_text(encoding="utf-8"))
+                except Exception:
+                    port_records = []
+        elif stages_arg is not None and "ports" in active_stages and subs:
             from .plugins import NaabuPlugin
             from .pipeline import filter_in_scope_targets
 
@@ -756,10 +882,32 @@ def _run_scan(args):
                         json.dumps(port_records, indent=2), encoding="utf-8"
                     )
                     print(f"[+] Found {len(port_records)} open ports")
+                    try:
+                        from . import db
+
+                        db.save_ports(db_path, domain, run_id, port_records)
+                    except Exception:
+                        pass
                 except Exception as e:
                     print(f"[!] naabu failed: {e}")
+            try:
+                from . import db
 
-        if stages_arg is not None and "vulns" in active_stages and live:
+                db.record_stage_completed(db_path, run_id, "ports")
+            except Exception:
+                pass
+            if "ports" not in completed_stages:
+                completed_stages.append("ports")
+
+        if "vulns" in completed_stages:
+            print("[*] Stage 'vulns' already completed in resumed run. Loading cached.")
+            vulns_file = out_dir / "vulns.json"
+            if vulns_file.exists():
+                try:
+                    vuln_records = json.loads(vulns_file.read_text(encoding="utf-8"))
+                except Exception:
+                    vuln_records = []
+        elif stages_arg is not None and "vulns" in active_stages and live:
             from .plugins import NucleiPlugin
             from .pipeline import filter_in_scope_targets
 
@@ -788,8 +936,22 @@ def _run_scan(args):
                         json.dumps(vuln_records, indent=2), encoding="utf-8"
                     )
                     print(f"[+] Found {len(vuln_records)} findings")
+                    try:
+                        from . import db
+
+                        db.save_findings(db_path, domain, run_id, vuln_records)
+                    except Exception:
+                        pass
                 except Exception as e:
                     print(f"[!] nuclei failed: {e}")
+            try:
+                from . import db
+
+                db.record_stage_completed(db_path, run_id, "vulns")
+            except Exception:
+                pass
+            if "vulns" not in completed_stages:
+                completed_stages.append("vulns")
 
         write_report(
             domain,
@@ -807,7 +969,22 @@ def _run_scan(args):
 
             export_csv(domain, hosts_data, out_dir)
 
-        history.finalize_run(run_dir, subs, hosts_data or [], domain=domain)
+        history.finalize_run(
+            run_dir,
+            subs,
+            hosts_data or [],
+            domain=domain,
+            urls=all_urls,
+            ports=port_records,
+            findings=vuln_records,
+            stages_completed=completed_stages,
+        )
+        try:
+            from . import db
+
+            db.record_run_complete(db_path, run_id, status="completed")
+        except Exception:
+            pass
         print(f"[+] Saved scan snapshot ({run_id})")
 
         return {
@@ -816,6 +993,10 @@ def _run_scan(args):
             "subdomains": subs,
             "live": live,
             "hosts": hosts_data or [],
+            "urls": all_urls,
+            "ports": port_records,
+            "findings": vuln_records,
+            "stages_completed": completed_stages,
             "output_dir": str(out_dir),
         }
     except KeyboardInterrupt:

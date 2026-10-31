@@ -1,5 +1,8 @@
 # Scan results - never commit these
 output/
+*.db
+*.sqlite
+*.sqlite3
 
 # Scope files and targets
 scope.txt

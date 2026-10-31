@@ -128,12 +128,62 @@ def compare(old, new, triage_hosts=None):
         if hints:
             lead_hints[url] = hints
 
+    # 1. New open ports
+    old_ports = {}
+    for p in old.get("ports") or []:
+        if isinstance(p, dict) and "host" in p and "port" in p:
+            old_ports.setdefault(p["host"].lower(), set()).add(int(p["port"]))
+    new_ports = {}
+    for p in new.get("ports") or []:
+        if isinstance(p, dict) and "host" in p and "port" in p:
+            h = p["host"].lower()
+            port = int(p["port"])
+            if port not in old_ports.get(h, set()):
+                new_ports.setdefault(h, []).append(port)
+    for h in new_ports:
+        new_ports[h].sort()
+
+    # 2. New URLs / endpoints
+    old_urls = set()
+    for u in old.get("urls") or []:
+        url_str = u.get("url") if isinstance(u, dict) else str(u)
+        if url_str:
+            old_urls.add(url_str.strip())
+    new_urls_list = []
+    for u in new.get("urls") or []:
+        url_str = u.get("url") if isinstance(u, dict) else str(u)
+        if url_str and url_str.strip() not in old_urls:
+            new_urls_list.append(url_str.strip())
+    new_urls = sorted(set(new_urls_list))
+
+    # 3. New nuclei findings (deduped by template-id + host + matcher)
+    def _finding_key(f):
+        if not isinstance(f, dict):
+            return str(f)
+        return (
+            (f.get("template_id") or f.get("template-id") or "").strip().lower(),
+            (f.get("host") or "").strip().lower(),
+            (f.get("matcher_name") or f.get("matcher-name") or "").strip().lower(),
+        )
+
+    old_findings_keys = {_finding_key(f) for f in old.get("findings") or []}
+    new_findings = []
+    seen_new_findings = set()
+    for f in new.get("findings") or []:
+        key = _finding_key(f)
+        if key not in old_findings_keys and key not in seen_new_findings:
+            seen_new_findings.add(key)
+            new_findings.append(f)
+
     result = {
         "new_subdomains": sorted(new_subs - old_subs),
         "removed_subdomains": removed_subs,
         "new_live": new_live_urls,
         "gone_live": gone_live_urls,
         "changed": changed,
+        "new_ports": new_ports,
+        "new_urls": new_urls,
+        "new_findings": new_findings,
         "lead_hints": lead_hints,
     }
     if suppressed_triaged:
@@ -165,9 +215,21 @@ def format_diff(diff_result, old_id, new_id, new_data=None):
     changed = diff_result.get("changed", {})
     removed_subs = diff_result.get("removed_subdomains", [])
     gone_live = diff_result.get("gone_live", [])
+    new_ports = diff_result.get("new_ports", {})
+    new_urls = diff_result.get("new_urls", [])
+    new_findings = diff_result.get("new_findings", [])
     lead_hints = diff_result.get("lead_hints", {})
 
-    has_changes = any([new_subs, new_live, changed, removed_subs, gone_live])
+    has_changes = any([
+        new_subs,
+        new_live,
+        changed,
+        removed_subs,
+        gone_live,
+        new_ports,
+        new_urls,
+        new_findings,
+    ])
     if not has_changes:
         lines.append("[+] No changes detected between scans.")
         return "\n".join(lines)
@@ -225,6 +287,26 @@ def format_diff(diff_result, old_id, new_id, new_data=None):
                 for hint in lead_hints[url]:
                     lines.append(f"        * {hint}")
 
+    if new_ports:
+        lines.append(f"\n[+] NEW OPEN PORTS ({len(new_ports)} hosts):")
+        for h, ports in sorted(new_ports.items()):
+            ports_str = ", ".join(str(p) for p in ports)
+            lines.append(f"    + {h}: {ports_str}")
+
+    if new_urls:
+        lines.append(f"\n[+] NEW ENDPOINTS / URLS ({len(new_urls)}):")
+        for u in new_urls:
+            lines.append(f"    + {u}")
+
+    if new_findings:
+        lines.append(f"\n[!] NEW VULNERABILITY FINDINGS ({len(new_findings)}):")
+        for f in new_findings:
+            sev = (f.get("severity") or "info").upper()
+            name = f.get("name") or f.get("template_id") or "Finding"
+            host = f.get("host") or ""
+            tid = f.get("template_id") or ""
+            lines.append(f"    ! [{sev}] {name} ({tid}) on {host}")
+
     if removed_subs:
         lines.append(f"\n[-] Removed subdomains ({len(removed_subs)}) [informational]:")
         for s in removed_subs:
@@ -277,11 +359,14 @@ def run(args):
 
     diff_result = compare(old_data, new_data, triage_hosts=triaged_hosts)
     has_changes = any([
-        diff_result["new_subdomains"],
-        diff_result["new_live"],
-        diff_result["changed"],
-        diff_result["removed_subdomains"],
-        diff_result["gone_live"],
+        diff_result.get("new_subdomains"),
+        diff_result.get("new_live"),
+        diff_result.get("changed"),
+        diff_result.get("removed_subdomains"),
+        diff_result.get("gone_live"),
+        diff_result.get("new_ports"),
+        diff_result.get("new_urls"),
+        diff_result.get("new_findings"),
     ])
 
     notify_enabled = bool(getattr(args, "notify", False))

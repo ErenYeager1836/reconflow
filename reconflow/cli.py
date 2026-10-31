@@ -106,6 +106,11 @@ def build_parser():
         help="Display the pipeline stages and exact commands without executing them",
     )
     p_scan.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume previous incomplete scan run, skipping completed stages",
+    )
+    p_scan.add_argument(
         "--intrusive",
         action="store_true",
         help="Enable aggressive/intrusive templates in vulnerability scanning (warns on stderr)",
