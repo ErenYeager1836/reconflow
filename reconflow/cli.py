@@ -94,6 +94,27 @@ def build_parser():
         default=None,
         help="Comma-separated list of pipeline stages to skip (e.g. ports,vulns)",
     )
+    p_scan.add_argument(
+        "--rate",
+        type=int,
+        default=None,
+        help="Rate limit in requests per second for supported tools (e.g. 50)",
+    )
+    p_scan.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Display the pipeline stages and exact commands without executing them",
+    )
+    p_scan.add_argument(
+        "--intrusive",
+        action="store_true",
+        help="Enable aggressive/intrusive templates in vulnerability scanning (warns on stderr)",
+    )
+    p_scan.add_argument(
+        "--all-vulns",
+        action="store_true",
+        help="Alias for --intrusive to run all vulnerability templates",
+    )
 
     # diff subcommand
     p_diff = subparsers.add_parser(

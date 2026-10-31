@@ -525,8 +525,17 @@ def _run_scan(args):
         sys.exit("Error: Target domain is required.")
 
     output_dir = getattr(args, "output", "output") or "output"
-    threads = getattr(args, "threads", None)
-    timeout = getattr(args, "timeout", None)
+    threads_raw = getattr(args, "threads", None)
+    threads = threads_raw if isinstance(threads_raw, int) else 10
+    timeout_raw = getattr(args, "timeout", None)
+    timeout = timeout_raw if isinstance(timeout_raw, int) else 5
+    rate_raw = getattr(args, "rate", None)
+    rate = rate_raw if isinstance(rate_raw, int) else None
+    dry_run = getattr(args, "dry_run", False) is True
+    intrusive = (
+        getattr(args, "intrusive", False) is True
+        or getattr(args, "all_vulns", False) is True
+    )
     keep_wildcard = getattr(args, "keep_wildcard", False)
     json_report = bool(getattr(args, "json_report", False) or getattr(args, "json", False))
     csv_report = bool(getattr(args, "csv", False))
@@ -556,6 +565,40 @@ def _run_scan(args):
     else:
         active_stages = ["subdomains", "dns", "http"]
 
+    out_dir = Path(output_dir) / domain
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if dry_run:
+        from .pipeline import Pipeline
+
+        pipeline = Pipeline(
+            domain=domain,
+            output_dir=out_dir,
+            stages=active_stages,
+            threads=threads,
+            rate=rate,
+            timeout=timeout,
+            silent=getattr(args, "silent", False),
+            dry_run=True,
+            intrusive=intrusive,
+            scope_data=scope_data,
+        )
+        pipeline.dry_run_plan()
+        return {
+            "domain": domain,
+            "dry_run": True,
+            "stages": active_stages,
+            "subdomains": [],
+            "live": [],
+            "hosts": [],
+            "output_dir": str(out_dir),
+        }
+
+    if intrusive and "vulns" in active_stages:
+        from .pipeline import warn_intrusive
+
+        warn_intrusive()
+
     required_tools = []
     if "subdomains" in active_stages:
         required_tools.append("subfinder")
@@ -564,9 +607,6 @@ def _run_scan(args):
     if screenshots_enabled:
         required_tools.append("gowitness")
     check_tools(required_tools, exit_on_missing=False)
-
-    out_dir = Path(output_dir) / domain
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     from . import history
 
@@ -589,15 +629,9 @@ def _run_scan(args):
             )
 
         if scope_data:
-            from . import scope
+            from .pipeline import filter_in_scope_targets
 
-            in_scope_subs = []
-            for s in subs:
-                if scope.is_in_scope(s, scope_data):
-                    in_scope_subs.append(s)
-                else:
-                    print(f"[*] [scope] Skipped out-of-scope host: {s}")
-            subs = in_scope_subs
+            subs = filter_in_scope_targets(subs, scope_data)
             (out_dir / "subdomains.txt").write_text(
                 "\n".join(subs) + ("\n" if subs else ""), encoding="utf-8"
             )
@@ -669,6 +703,7 @@ def _run_scan(args):
 
         if stages_arg is not None and "urls" in active_stages:
             from .plugins import KatanaPlugin, GauPlugin, WaybackurlsPlugin
+            from .pipeline import filter_in_scope_targets
 
             all_urls = []
             for url_tool in [KatanaPlugin(), GauPlugin(), WaybackurlsPlugin()]:
@@ -677,16 +712,17 @@ def _run_scan(args):
                     continue
                 try:
                     if url_tool.name in ("gau", "waybackurls"):
-                        cmd = url_tool.build_command(domain)
+                        cmd = url_tool.build_command(domain, threads=threads)
                     else:
                         live_file = out_dir / "live.txt"
                         target = str(live_file) if live_file.exists() else domain
-                        cmd = url_tool.build_command(target)
+                        cmd = url_tool.build_command(target, threads=threads, rate=rate)
                     code, stdout, stderr = url_tool.run_command_safe(
                         cmd, timeout=timeout or 300
                     )
                     records = url_tool.parse_output(stdout, stderr)
-                    all_urls.extend([r["url"] for r in records if "url" in r])
+                    raw_urls = [r["url"] for r in records if "url" in r]
+                    all_urls.extend(filter_in_scope_targets(raw_urls, scope_data))
                 except Exception as e:
                     print(f"[!] {url_tool.name} failed: {e}")
             if all_urls:
@@ -698,6 +734,7 @@ def _run_scan(args):
 
         if stages_arg is not None and "ports" in active_stages and subs:
             from .plugins import NaabuPlugin
+            from .pipeline import filter_in_scope_targets
 
             naabu = NaabuPlugin()
             if not naabu.is_installed():
@@ -707,7 +744,10 @@ def _run_scan(args):
                 )
             else:
                 try:
-                    cmd = naabu.build_command(str(out_dir / "subdomains.txt"))
+                    in_scope_subs = filter_in_scope_targets(subs, scope_data)
+                    subs_file = out_dir / "subdomains.txt"
+                    subs_file.write_text("\n".join(in_scope_subs) + "\n", encoding="utf-8")
+                    cmd = naabu.build_command(str(subs_file), threads=threads, rate=rate)
                     code, stdout, stderr = naabu.run_command_safe(
                         cmd, timeout=timeout or 600
                     )
@@ -721,6 +761,7 @@ def _run_scan(args):
 
         if stages_arg is not None and "vulns" in active_stages and live:
             from .plugins import NucleiPlugin
+            from .pipeline import filter_in_scope_targets
 
             nuclei = NucleiPlugin()
             if not nuclei.is_installed():
@@ -730,7 +771,15 @@ def _run_scan(args):
                 )
             else:
                 try:
-                    cmd = nuclei.build_command(str(out_dir / "live.txt"))
+                    in_scope_live = filter_in_scope_targets(live, scope_data)
+                    live_file = out_dir / "live.txt"
+                    live_file.write_text("\n".join(in_scope_live) + "\n", encoding="utf-8")
+                    cmd = nuclei.build_command(
+                        str(live_file),
+                        threads=threads,
+                        rate=rate,
+                        intrusive=intrusive,
+                    )
                     code, stdout, stderr = nuclei.run_command_safe(
                         cmd, timeout=timeout or 600
                     )

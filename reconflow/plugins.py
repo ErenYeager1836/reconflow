@@ -145,6 +145,12 @@ class SubfinderPlugin(ToolPlugin):
 
     def build_command(self, target: Any, **kwargs) -> List[str]:
         cmd = [self.get_binary_path() or self.binary, "-d", str(target), "-silent"]
+        threads = kwargs.get("threads")
+        if threads:
+            cmd.extend(["-t", str(threads)])
+        rate = kwargs.get("rate")
+        if rate:
+            cmd.extend(["-rl", str(rate)])
         all_sources = kwargs.get("all_sources", False)
         if all_sources:
             cmd.append("-all")
@@ -176,6 +182,9 @@ class DnsxPlugin(ToolPlugin):
         threads = kwargs.get("threads")
         if threads:
             cmd.extend(["-t", str(threads)])
+        rate = kwargs.get("rate")
+        if rate:
+            cmd.extend(["-rl", str(rate)])
         if isinstance(target, str) and (target.endswith(".txt") or "\n" not in target):
             if shutil.which("test") is not None and target.endswith(".txt"):
                 cmd.extend(["-l", target])
@@ -245,6 +254,9 @@ class HttpxPlugin(ToolPlugin):
         threads = kwargs.get("threads")
         if threads:
             cmd.extend(["-threads", str(threads)])
+        rate = kwargs.get("rate")
+        if rate:
+            cmd.extend(["-rate-limit", str(rate)])
         timeout = kwargs.get("timeout")
         if timeout:
             cmd.extend(["-timeout", str(timeout)])
@@ -292,7 +304,15 @@ class KatanaPlugin(ToolPlugin):
 
     def build_command(self, target: Any, **kwargs) -> List[str]:
         bin_path = self.get_binary_path() or self.binary
-        cmd = [bin_path, "-silent", "-json", "-depth", "2", "-concurrency", "10"]
+        cmd = [bin_path, "-silent", "-json", "-depth", "2"]
+        threads = kwargs.get("threads")
+        if threads:
+            cmd.extend(["-concurrency", str(threads)])
+        else:
+            cmd.extend(["-concurrency", "10"])
+        rate = kwargs.get("rate")
+        if rate:
+            cmd.extend(["-rate-limit", str(rate)])
         if isinstance(target, str):
             if target.endswith(".txt"):
                 cmd.extend(["-list", target])
@@ -418,6 +438,12 @@ class NaabuPlugin(ToolPlugin):
     def build_command(self, target: Any, **kwargs) -> List[str]:
         bin_path = self.get_binary_path() or self.binary
         cmd = [bin_path, "-silent", "-json", "-top-ports", "100"]
+        threads = kwargs.get("threads")
+        if threads:
+            cmd.extend(["-c", str(threads)])
+        rate = kwargs.get("rate")
+        if rate:
+            cmd.extend(["-rate", str(rate)])
         if isinstance(target, str) and target.endswith(".txt"):
             cmd.extend(["-list", target])
         elif isinstance(target, str):
@@ -457,16 +483,29 @@ class NucleiPlugin(ToolPlugin):
 
     def build_command(self, target: Any, **kwargs) -> List[str]:
         bin_path = self.get_binary_path() or self.binary
-        cmd = [
-            bin_path,
-            "-silent",
-            "-jsonl",
-            "-severity",
-            "info,low,medium,high,critical",
-        ]
+        cmd = [bin_path, "-silent", "-jsonl"]
+
+        intrusive = kwargs.get("intrusive", False)
         tags = kwargs.get("tags")
-        if tags:
-            cmd.extend(["-tags", str(tags)])
+        if not intrusive:
+            safe_tags = str(tags) if tags else "technologies,exposure,misconfiguration,takeover"
+            cmd.extend([
+                "-tags",
+                safe_tags,
+                "-exclude-severity",
+                "high,critical",
+            ])
+        else:
+            cmd.extend(["-severity", "info,low,medium,high,critical"])
+            if tags:
+                cmd.extend(["-tags", str(tags)])
+
+        threads = kwargs.get("threads")
+        if threads:
+            cmd.extend(["-c", str(threads)])
+        rate = kwargs.get("rate")
+        if rate:
+            cmd.extend(["-rate-limit", str(rate)])
         if isinstance(target, str) and target.endswith(".txt"):
             cmd.extend(["-list", target])
         elif isinstance(target, str):

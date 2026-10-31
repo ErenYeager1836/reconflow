@@ -1,5 +1,6 @@
 """reconflow.pipeline - Stage-based recon pipeline orchestrator."""
 
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -19,6 +20,8 @@ CANONICAL_STAGES = [
 ]
 
 STAGE_ALIASES = {
+    # All stages
+    "all": "all",
     # Subdomain Enum
     "subdomains": "subdomains",
     "subdomain": "subdomains",
@@ -75,8 +78,13 @@ def resolve_stages(
         requested: Set[str] = set()
         for item in stages_arg.split(","):
             item = item.strip()
-            if item:
-                requested.add(normalize_stage_name(item))
+            if not item:
+                continue
+            norm = normalize_stage_name(item)
+            if norm == "all":
+                requested.update(CANONICAL_STAGES)
+            else:
+                requested.add(norm)
         active = [s for s in CANONICAL_STAGES if s in requested]
     else:
         active = list(CANONICAL_STAGES)
@@ -86,10 +94,62 @@ def resolve_stages(
         for item in skip_arg.split(","):
             item = item.strip()
             if item:
-                skipped.add(normalize_stage_name(item))
+                norm = normalize_stage_name(item)
+                if norm == "all":
+                    skipped.update(CANONICAL_STAGES)
+                else:
+                    skipped.add(norm)
         active = [s for s in active if s not in skipped]
 
     return active
+
+
+def filter_in_scope_targets(
+    targets: List[str],
+    scope_data: Optional[Dict[str, Any]],
+    log_fn=None,
+) -> List[str]:
+    """Hard gate: enforce program scope boundaries on targets before tool execution.
+
+    Any host, URL, or IP outside the loaded scope is dropped BEFORE being passed
+    to a tool, and logged as:
+      [*] [scope] Skipped out-of-scope host: <target>
+      [*] [scope] out of scope, skip <target>
+    """
+    if not scope_data:
+        return list(targets)
+
+    from . import scope
+
+    in_scope = []
+    for t in targets:
+        if scope.is_in_scope(t, scope_data):
+            in_scope.append(t)
+        else:
+            msg1 = f"[*] [scope] Skipped out-of-scope host: {t}"
+            msg2 = f"[*] [scope] out of scope, skip {t}"
+            if log_fn:
+                log_fn(msg1)
+                log_fn(msg2)
+            else:
+                print(msg1)
+                print(msg2)
+    return in_scope
+
+
+def warn_intrusive() -> None:
+    """Print high-visibility warning to stderr when intrusive scanning is enabled."""
+    sys.stderr.write(
+        "\n"
+        + "=" * 80
+        + "\n"
+        "[WARNING] INTRUSIVE SCANNING ENABLED (--intrusive / --all-vulns)\n"
+        "Aggressive and potentially disruptive vulnerability templates will be executed.\n"
+        "Ensure you have explicit written authorization for intrusive testing on this target!\n"
+        + "=" * 80
+        + "\n\n"
+    )
+    sys.stderr.flush()
 
 
 @dataclass
@@ -99,9 +159,12 @@ class PipelineContext:
     domain: str
     output_dir: Path
     stages: List[str] = field(default_factory=list)
-    threads: Optional[int] = None
+    threads: int = 10
+    rate: Optional[int] = None
     timeout: Optional[int] = None
     silent: bool = False
+    dry_run: bool = False
+    intrusive: bool = False
     scope_data: Optional[Dict[str, Any]] = None
     subdomains: List[str] = field(default_factory=list)
     dns_records: List[Dict[str, Any]] = field(default_factory=list)
@@ -113,8 +176,6 @@ class PipelineContext:
 
     def log(self, message: str) -> None:
         """Print progress or diagnostics to stderr if silent, else stdout."""
-        import sys
-
         target = sys.stderr if self.silent else sys.stdout
         print(message, file=target, flush=True)
 
@@ -128,19 +189,85 @@ class Pipeline:
         output_dir: Path,
         stages: Optional[List[str]] = None,
         threads: Optional[int] = None,
+        rate: Optional[int] = None,
         timeout: Optional[int] = None,
         silent: bool = False,
+        dry_run: bool = False,
+        intrusive: bool = False,
         scope_data: Optional[Dict[str, Any]] = None,
     ):
         self.context = PipelineContext(
             domain=domain,
             output_dir=output_dir,
             stages=stages if stages is not None else list(CANONICAL_STAGES),
-            threads=threads,
+            threads=threads if threads is not None else 10,
+            rate=rate,
             timeout=timeout,
             silent=silent,
+            dry_run=dry_run,
+            intrusive=intrusive,
             scope_data=scope_data,
         )
+
+    def dry_run_plan(self) -> None:
+        """Display the pipeline execution plan, active tools, and commands without running them."""
+        domain = self.context.domain
+        out_dir = self.context.output_dir
+        stages = self.context.stages
+        threads = self.context.threads or 10
+        rate_str = f"{self.context.rate} req/s" if self.context.rate else "unconstrained"
+        intrusive_str = (
+            "ENABLED (Aggressive)" if self.context.intrusive else "Disabled (Safe only)"
+        )
+        scope_str = (
+            str(self.context.scope_data.get("path")) if self.context.scope_data else "None"
+        )
+
+        print("=" * 80)
+        print("reconflow scan [DRY RUN]")
+        print(f"Target Domain: {domain}")
+        print(f"Scope File:    {scope_str}")
+        print(f"Rate Limit:    {rate_str} | Threads: {threads}")
+        print(f"Intrusive:     {intrusive_str}")
+        print("=" * 80)
+        print(f"Active Stages ({len(stages)}):")
+
+        for idx, stage in enumerate(stages, 1):
+            plugins = get_plugins_for_stage(stage)
+            plugin_names = ", ".join(p.name for p in plugins)
+            print(f"  {idx}. {stage:<12} [tools: {plugin_names}]")
+            for p in plugins:
+                installed = p.is_installed()
+                status = (
+                    f"[OK: {p.get_binary_path() or p.binary}]"
+                    if installed
+                    else "[MISSING: will skip]"
+                )
+
+                if stage == "subdomains":
+                    target = domain
+                elif stage in ("dns", "ports"):
+                    target = str(out_dir / "subdomains.txt")
+                elif stage in ("http", "vulns"):
+                    target = str(out_dir / "live.txt")
+                elif stage == "urls":
+                    target = str(out_dir / "live.txt") if p.name == "katana" else domain
+                else:
+                    target = domain
+
+                cmd = p.build_command(
+                    target,
+                    threads=self.context.threads,
+                    rate=self.context.rate,
+                    intrusive=self.context.intrusive,
+                    timeout=self.context.timeout,
+                )
+                cmd_str = " ".join(cmd)
+                print(f"     Tool {p.name:<11} {status}")
+                print(f"     Command: {cmd_str}")
+
+        print("=" * 80)
+        print("[+] Dry run complete. No commands or network scans were executed.")
 
     def run_stage(self, stage: str) -> None:
         """Run all configured plugins for a specific stage."""
@@ -170,18 +297,32 @@ class Pipeline:
             self.context.stage_status[stage] = "completed"
 
     def _execute_plugin(self, plugin: ToolPlugin, stage: str) -> None:
-        """Execute a single tool plugin within its stage."""
+        """Execute a single tool plugin within its stage with hard scope gates."""
         self.context.log(f"[*] Executing {plugin.name}...")
         out_dir = self.context.output_dir
         out_dir.mkdir(parents=True, exist_ok=True)
 
         if stage == "subdomains":
-            cmd = plugin.build_command(self.context.domain)
+            # Check domain against scope first
+            if not filter_in_scope_targets(
+                [self.context.domain], self.context.scope_data, log_fn=self.context.log
+            ):
+                self.context.log(f"[!] Target domain {self.context.domain} is out of scope.")
+                return
+
+            cmd = plugin.build_command(
+                self.context.domain,
+                threads=self.context.threads,
+                rate=self.context.rate,
+            )
             code, stdout, stderr = plugin.run_command_safe(
                 cmd, timeout=self.context.timeout
             )
             records = plugin.parse_output(stdout, stderr)
-            hosts = [r["host"] for r in records if "host" in r]
+            raw_hosts = [r["host"] for r in records if "host" in r]
+            hosts = filter_in_scope_targets(
+                raw_hosts, self.context.scope_data, log_fn=self.context.log
+            )
             for h in hosts:
                 if h not in self.context.subdomains:
                     self.context.subdomains.append(h)
@@ -190,14 +331,25 @@ class Pipeline:
                 "\n".join(self.context.subdomains) + "\n" if self.context.subdomains else "",
                 encoding="utf-8",
             )
-            self.context.log(f"[+] Found {len(hosts)} subdomains via {plugin.name}")
+            self.context.log(f"[+] Found {len(hosts)} in-scope subdomains via {plugin.name}")
 
         elif stage == "dns":
-            subs_file = out_dir / "subdomains.txt"
-            if not subs_file.exists() or not self.context.subdomains:
-                self.context.log("[!] No subdomains available for DNS resolution.")
+            subs_in_scope = filter_in_scope_targets(
+                self.context.subdomains, self.context.scope_data, log_fn=self.context.log
+            )
+            if not subs_in_scope:
+                self.context.log("[!] No in-scope subdomains available for DNS resolution.")
                 return
-            cmd = plugin.build_command(str(subs_file), threads=self.context.threads)
+            subs_file = out_dir / "subdomains.txt"
+            subs_file.write_text(
+                "\n".join(subs_in_scope) + "\n",
+                encoding="utf-8",
+            )
+            cmd = plugin.build_command(
+                str(subs_file),
+                threads=self.context.threads,
+                rate=self.context.rate,
+            )
             code, stdout, stderr = plugin.run_command_safe(
                 cmd, timeout=self.context.timeout
             )
@@ -206,59 +358,127 @@ class Pipeline:
             self.context.log(f"[+] Resolved {len(records)} DNS records via {plugin.name}")
 
         elif stage == "http":
-            subs_file = out_dir / "subdomains.txt"
-            if not subs_file.exists() or not self.context.subdomains:
-                self.context.log("[!] No subdomains available for HTTP probing.")
+            subs_in_scope = filter_in_scope_targets(
+                self.context.subdomains, self.context.scope_data, log_fn=self.context.log
+            )
+            if not subs_in_scope:
+                self.context.log("[!] No in-scope subdomains available for HTTP probing.")
                 return
+            subs_file = out_dir / "subdomains.txt"
+            subs_file.write_text(
+                "\n".join(subs_in_scope) + "\n",
+                encoding="utf-8",
+            )
             cmd = plugin.build_command(
                 str(subs_file),
                 threads=self.context.threads,
+                rate=self.context.rate,
                 timeout=self.context.timeout,
             )
             code, stdout, stderr = plugin.run_command_safe(
                 cmd, timeout=self.context.timeout
             )
             records = plugin.parse_output(stdout, stderr)
-            self.context.live_hosts.extend(records)
-            live_urls = [r["url"] for r in records if r.get("url")]
+            # Filter live hosts by URL and hostname
+            in_scope_records = []
+            for r in records:
+                target = r.get("url") or r.get("host")
+                if filter_in_scope_targets(
+                    [target], self.context.scope_data, log_fn=self.context.log
+                ):
+                    in_scope_records.append(r)
+            self.context.live_hosts.extend(in_scope_records)
+            live_urls = [r["url"] for r in in_scope_records if r.get("url")]
             live_file = out_dir / "live.txt"
             live_file.write_text(
                 "\n".join(live_urls) + "\n" if live_urls else "",
                 encoding="utf-8",
             )
-            self.context.log(f"[+] Probed {len(records)} live HTTP services via {plugin.name}")
+            self.context.log(
+                f"[+] Probed {len(in_scope_records)} in-scope live HTTP services via {plugin.name}"
+            )
 
         elif stage == "urls":
-            # Katana can crawl live URLs; gau and waybackurls query domain archives
             if plugin.name in ("gau", "waybackurls"):
-                cmd = plugin.build_command(self.context.domain)
+                if not filter_in_scope_targets(
+                    [self.context.domain], self.context.scope_data, log_fn=self.context.log
+                ):
+                    return
+                cmd = plugin.build_command(self.context.domain, threads=self.context.threads)
             else:
                 live_file = out_dir / "live.txt"
                 target = str(live_file) if live_file.exists() else self.context.domain
-                cmd = plugin.build_command(target)
+                cmd = plugin.build_command(
+                    target,
+                    threads=self.context.threads,
+                    rate=self.context.rate,
+                )
 
             code, stdout, stderr = plugin.run_command_safe(
                 cmd, timeout=self.context.timeout
             )
-            records = plugin.parse_output(stdout, stderr)
-            self.context.urls.extend(records)
-            self.context.log(f"[+] Collected {len(records)} URLs via {plugin.name}")
+            raw_records = plugin.parse_output(stdout, stderr)
+            # Hard scope gate on all collected URLs
+            in_scope_records = []
+            for r in raw_records:
+                url_str = r.get("url", "")
+                if filter_in_scope_targets(
+                    [url_str], self.context.scope_data, log_fn=self.context.log
+                ):
+                    in_scope_records.append(r)
+            self.context.urls.extend(in_scope_records)
+            self.context.log(
+                f"[+] Collected {len(in_scope_records)} in-scope URLs via {plugin.name}"
+            )
 
         elif stage == "ports":
+            subs_in_scope = filter_in_scope_targets(
+                self.context.subdomains, self.context.scope_data, log_fn=self.context.log
+            )
+            if not subs_in_scope:
+                self.context.log("[!] No in-scope targets for port scanning.")
+                return
             subs_file = out_dir / "subdomains.txt"
-            target = str(subs_file) if subs_file.exists() else self.context.domain
-            cmd = plugin.build_command(target)
+            target = str(subs_file)
+            cmd = plugin.build_command(
+                target,
+                threads=self.context.threads,
+                rate=self.context.rate,
+            )
             code, stdout, stderr = plugin.run_command_safe(
                 cmd, timeout=self.context.timeout
             )
-            records = plugin.parse_output(stdout, stderr)
-            self.context.ports.extend(records)
-            self.context.log(f"[+] Found {len(records)} open ports via {plugin.name}")
+            raw_records = plugin.parse_output(stdout, stderr)
+            in_scope_records = []
+            for r in raw_records:
+                target_host = r.get("host") or r.get("ip")
+                if filter_in_scope_targets(
+                    [target_host], self.context.scope_data, log_fn=self.context.log
+                ):
+                    in_scope_records.append(r)
+            self.context.ports.extend(in_scope_records)
+            self.context.log(
+                f"[+] Found {len(in_scope_records)} in-scope open ports via {plugin.name}"
+            )
 
         elif stage == "vulns":
+            if self.context.intrusive:
+                warn_intrusive()
+
+            live_urls = [r["url"] for r in self.context.live_hosts if r.get("url")]
+            urls_in_scope = filter_in_scope_targets(
+                live_urls, self.context.scope_data, log_fn=self.context.log
+            )
+            if not urls_in_scope:
+                self.context.log("[!] No in-scope live URLs for vulnerability scanning.")
+                return
             live_file = out_dir / "live.txt"
-            target = str(live_file) if live_file.exists() else self.context.domain
-            cmd = plugin.build_command(target)
+            cmd = plugin.build_command(
+                str(live_file),
+                threads=self.context.threads,
+                rate=self.context.rate,
+                intrusive=self.context.intrusive,
+            )
             code, stdout, stderr = plugin.run_command_safe(
                 cmd, timeout=self.context.timeout
             )
@@ -267,7 +487,11 @@ class Pipeline:
             self.context.log(f"[+] Identified {len(records)} findings via {plugin.name}")
 
     def run(self) -> PipelineContext:
-        """Execute the entire configured pipeline."""
+        """Execute the entire configured pipeline, or output dry-run plan."""
+        if self.context.dry_run:
+            self.dry_run_plan()
+            return self.context
+
         for stage in self.context.stages:
             self.run_stage(stage)
         return self.context
