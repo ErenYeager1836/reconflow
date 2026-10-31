@@ -176,6 +176,14 @@ reconflow scan example.com --stages vulns --intrusive
 | `--json` | Write structured results to `report.json` |
 | `--csv` | Write live host data to `report.csv` |
 
+#### Vulnerability Scanning & Nuclei Safe Mode
+
+reconflow prioritizes target safety and politeness by default:
+
+- **Default Safe Mode**: When the `vulns` stage runs, nuclei executes **ONLY** low-risk templates (`info`, `low`, `medium`) and **NEVER** runs `high` or `critical` severity templates out of the box. Disruptive tags like `dos`, `fuzz`, and `intrusive` are strictly excluded.
+- **Subdomain Takeovers**: Takeover candidates are discovered via reconflow's dedicated CNAME inspection (checking dangling DNS pointers against recognized signatures like GitHub Pages, AWS S3, Heroku) and marked conservatively as `"candidate, verify manually"`, rather than executing high/critical nuclei templates.
+- **Enabling Higher Severities**: To execute higher-severity (`high`, `critical`) or intrusive templates, you must explicitly pass `--intrusive` or `--all-vulns`. When enabled, reconflow emits a prominent warning banner to stderr reminding you to ensure written authorization.
+
 ---
 
 ### 3. Track Changes (`diff`)
