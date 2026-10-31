@@ -207,6 +207,21 @@ def load_scope(scope_file_path: str or Path) -> dict:
         "path": str(path),
         "in_scope": in_scope_rules,
         "out_of_scope": out_of_scope_rules,
+        "is_default": False,
+    }
+
+
+def make_default_scope(domain: str) -> dict:
+    """Create a default scope restricting targets to domain and its subdomains (*.domain)."""
+    norm = normalize_host(domain)
+    return {
+        "path": None,
+        "in_scope": [
+            ScopeRule(f"*.{norm}", is_out_of_scope=False),
+            ScopeRule(norm, is_out_of_scope=False),
+        ],
+        "out_of_scope": [],
+        "is_default": True,
     }
 
 

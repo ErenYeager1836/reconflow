@@ -560,6 +560,15 @@ def _run_scan(args):
             scope_data = scope.load_scope(scope_file)
         except scope.ScopeError as e:
             sys.exit(f"Error: {e}")
+    else:
+        from . import scope
+
+        scope_data = scope.make_default_scope(domain)
+        if not dry_run:
+            print(
+                f"[!] No scope file loaded: limiting to {domain} and subdomains. "
+                "Use --scope FILE for program-specific scope."
+            )
 
     from .pipeline import resolve_stages
 

@@ -196,6 +196,10 @@ class Pipeline:
         intrusive: bool = False,
         scope_data: Optional[Dict[str, Any]] = None,
     ):
+        if scope_data is None:
+            from . import scope
+            scope_data = scope.make_default_scope(domain)
+
         self.context = PipelineContext(
             domain=domain,
             output_dir=output_dir,
@@ -219,14 +223,20 @@ class Pipeline:
         intrusive_str = (
             "ENABLED (Aggressive)" if self.context.intrusive else "Disabled (Safe only)"
         )
-        scope_str = (
-            str(self.context.scope_data.get("path")) if self.context.scope_data else "None"
+        scope_path = (
+            self.context.scope_data.get("path") if self.context.scope_data else None
         )
+        scope_str = str(scope_path) if scope_path else "None"
 
         print("=" * 80)
         print("reconflow scan [DRY RUN]")
         print(f"Target Domain: {domain}")
         print(f"Scope File:    {scope_str}")
+        if not scope_path:
+            print(
+                f"[!] No scope file loaded: limiting to {domain} and subdomains. "
+                "Use --scope FILE for program-specific scope."
+            )
         print(f"Rate Limit:    {rate_str} | Threads: {threads}")
         print(f"Intrusive:     {intrusive_str}")
         print("=" * 80)
@@ -491,6 +501,12 @@ class Pipeline:
         if self.context.dry_run:
             self.dry_run_plan()
             return self.context
+
+        if self.context.scope_data and self.context.scope_data.get("is_default"):
+            self.context.log(
+                f"[!] No scope file loaded: limiting to {self.context.domain} and subdomains. "
+                "Use --scope FILE for program-specific scope."
+            )
 
         for stage in self.context.stages:
             self.run_stage(stage)

@@ -84,6 +84,7 @@ def mine_js_content(
     content: str,
     base_url: str = "",
     target_domain: Optional[str] = None,
+    log_fn: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Parse JavaScript content for endpoints, subdomains, and masked secrets."""
     endpoints: Set[str] = set()
@@ -99,6 +100,23 @@ def mine_js_content(
             if ep.endswith((".png", ".jpg", ".jpeg", ".gif", ".svg", ".css", ".woff", ".woff2")):
                 continue
             if ep.startswith("http://") or ep.startswith("https://"):
+                if target_domain:
+                    parsed_host = urlparse(ep).netloc.split(":")[0].lower()
+                    t_low = target_domain.lower()
+                    if (
+                        parsed_host
+                        and not parsed_host.endswith(f".{t_low}")
+                        and parsed_host != t_low
+                    ):
+                        msg1 = f"[*] [scope] Skipped out-of-scope host: {ep}"
+                        msg2 = f"[*] [scope] out of scope, skip {ep}"
+                        if log_fn:
+                            log_fn(msg1)
+                            log_fn(msg2)
+                        else:
+                            print(msg1)
+                            print(msg2)
+                        continue
                 endpoints.add(ep)
             elif base_url:
                 endpoints.add(urljoin(base_url, ep))
@@ -112,6 +130,14 @@ def mine_js_content(
         if target_domain:
             t_low = target_domain.lower()
             if not host.endswith(f".{t_low}") and host != t_low:
+                msg1 = f"[*] [scope] Skipped out-of-scope host: {host}"
+                msg2 = f"[*] [scope] out of scope, skip {host}"
+                if log_fn:
+                    log_fn(msg1)
+                    log_fn(msg2)
+                else:
+                    print(msg1)
+                    print(msg2)
                 continue
         if "." in host and not host.endswith((".js", ".json", ".html", ".png", ".jpg", ".css")):
             subdomains.add(host)

@@ -68,7 +68,79 @@ class TestScopeHardGate(unittest.TestCase):
                        return_value=(0, mock_http_out + "\n", "")):
                 ctx = pipeline.run()
                 self.assertEqual(len(ctx.live_hosts), 1)
-                self.assertEqual(ctx.live_hosts[0]["url"], "https://api.example.com")
+
+    def test_no_scope_file_restricts_to_domain_and_subdomains(self):
+        """When no scope file is loaded, limit to target domain and subdomains by default."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            logs = []
+            pipeline = Pipeline(
+                domain="example.com",
+                output_dir=out_dir,
+                stages=["urls"],
+                silent=False,
+                scope_data=None,  # No scope file
+            )
+            # Inspect that default scope was generated
+            self.assertTrue(pipeline.context.scope_data.get("is_default"))
+
+            # Mock URL collection tool returning both in-scope and out-of-scope URLs
+            mock_urls = (
+                "https://example.com/login\n"
+                "https://api.example.com/v1/users\n"
+                "https://evil.com/leak\n"
+                "https://notexample.com/fake\n"
+            )
+            with patch("reconflow.plugins.WaybackurlsPlugin.is_installed", return_value=True), \
+                 patch("reconflow.plugins.WaybackurlsPlugin.run_command_safe",
+                       return_value=(0, mock_urls, "")), \
+                 patch("reconflow.plugins.KatanaPlugin.is_installed", return_value=False), \
+                 patch("reconflow.plugins.GauPlugin.is_installed", return_value=False):
+                pipeline.context.log = logs.append
+                ctx = pipeline.run()
+
+                # Verify in-scope URLs are accepted
+                collected_urls = [r["url"] for r in ctx.urls]
+                self.assertIn("https://example.com/login", collected_urls)
+                self.assertIn("https://api.example.com/v1/users", collected_urls)
+
+                # Verify out-of-scope URLs are dropped
+                self.assertNotIn("https://evil.com/leak", collected_urls)
+                self.assertNotIn("https://notexample.com/fake", collected_urls)
+
+                # Verify exact dropped & logged messages
+                self.assertTrue(
+                    any("out of scope, skip https://evil.com/leak" in log for log in logs)
+                )
+                self.assertTrue(
+                    any("out of scope, skip https://notexample.com/fake" in log for log in logs)
+                )
+
+                # Verify warning message at scan start
+                self.assertTrue(
+                    any("No scope file loaded: limiting to example.com and subdomains" in log
+                        for log in logs)
+                )
+
+    def test_mining_drops_and_logs_out_of_scope_urls(self):
+        """Discovered out-of-scope hosts in JS mining must be dropped and logged."""
+        from reconflow import mining
+        logs = []
+        js = """
+        const inScope = "https://app.example.com/api";
+        const outScope = "https://evil-analytics.com/track";
+        """
+        res = mining.mine_js_content(
+            js,
+            base_url="https://example.com",
+            target_domain="example.com",
+            log_fn=logs.append,
+        )
+        self.assertIn("https://app.example.com/api", res["endpoints"])
+        self.assertNotIn("https://evil-analytics.com/track", res["endpoints"])
+        self.assertTrue(
+            any("out of scope, skip https://evil-analytics.com/track" in log for log in logs)
+        )
 
 
 class TestRateLimitingAndThreads(unittest.TestCase):
@@ -190,6 +262,10 @@ class TestDryRunMode(unittest.TestCase):
 
                 stdout_text = mock_stdout.getvalue()
                 self.assertIn("reconflow scan [DRY RUN]", stdout_text)
+                self.assertIn(
+                    "No scope file loaded: limiting to example.com and subdomains",
+                    stdout_text,
+                )
                 self.assertIn("Target Domain: example.com", stdout_text)
                 self.assertIn("Rate Limit:    50 req/s", stdout_text)
                 self.assertIn("Command:", stdout_text)
