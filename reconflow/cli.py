@@ -84,6 +84,16 @@ def build_parser():
         default=None,
         help="Path to scope file (enforces strict scope boundaries)",
     )
+    p_scan.add_argument(
+        "--stages",
+        default=None,
+        help="Comma-separated list of pipeline stages to run (e.g. subdomains,http,vulns)",
+    )
+    p_scan.add_argument(
+        "--skip",
+        default=None,
+        help="Comma-separated list of pipeline stages to skip (e.g. ports,vulns)",
+    )
 
     # diff subcommand
     p_diff = subparsers.add_parser(
@@ -215,6 +225,16 @@ def build_parser():
         help="List all triaged hosts for domain",
     )
 
+    # doctor subcommand
+    subparsers.add_parser(
+        "doctor",
+        help="Check external recon toolchain and dependencies",
+        description=(
+            "List installed external binaries, versions, and "
+            "installation hints for missing tools."
+        ),
+    )
+
     return parser
 
 
@@ -241,6 +261,10 @@ def main(args=None):
         from . import triage
 
         triage.run(parsed_args)
+    elif parsed_args.command == "doctor":
+        from . import doctor
+
+        doctor.run(parsed_args)
     else:
         parser.print_help()
         sys.exit(0)

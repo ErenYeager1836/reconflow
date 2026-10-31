@@ -66,7 +66,7 @@ def resolve_httpx_binary():
     return None
 
 
-def check_tools(tools):
+def check_tools(tools, exit_on_missing=True):
     """Check that required external binaries are available in PATH."""
     missing = []
     for t in tools:
@@ -91,7 +91,12 @@ def check_tools(tools):
             "(https://github.com/projectdiscovery/httpx),"
         )
         lines.append("      not the Python 'httpx' library from PyPI.")
-        sys.exit("\n".join(lines))
+        msg = "\n".join(lines)
+        if exit_on_missing:
+            sys.exit(msg)
+        else:
+            print(msg)
+    return missing
 
 
 def resolve(host):
@@ -536,10 +541,29 @@ def _run_scan(args):
         except scope.ScopeError as e:
             sys.exit(f"Error: {e}")
 
-    required_tools = ["subfinder", "httpx"]
+    from .pipeline import resolve_stages
+
+    stages_raw = getattr(args, "stages", None)
+    stages_arg = stages_raw if isinstance(stages_raw, str) else None
+    skip_raw = getattr(args, "skip", None)
+    skip_arg = skip_raw if isinstance(skip_raw, str) else None
+
+    if stages_arg is not None or skip_arg is not None:
+        try:
+            active_stages = resolve_stages(stages_arg, skip_arg)
+        except ValueError as e:
+            sys.exit(f"Error: {e}")
+    else:
+        active_stages = ["subdomains", "dns", "http"]
+
+    required_tools = []
+    if "subdomains" in active_stages:
+        required_tools.append("subfinder")
+    if "http" in active_stages:
+        required_tools.append("httpx")
     if screenshots_enabled:
         required_tools.append("gowitness")
-    check_tools(required_tools)
+    check_tools(required_tools, exit_on_missing=False)
 
     out_dir = Path(output_dir) / domain
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -549,7 +573,20 @@ def _run_scan(args):
     run_id, run_dir = history.init_run(out_dir, domain=domain)
 
     try:
-        subs = find_subdomains(domain, out_dir / "subdomains.txt")
+        if "subdomains" in active_stages:
+            subs = find_subdomains(domain, out_dir / "subdomains.txt")
+        else:
+            print("[*] Skipping subdomain enum stage")
+            subs_file = out_dir / "subdomains.txt"
+            subs = (
+                [
+                    line.strip()
+                    for line in subs_file.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                ]
+                if subs_file.exists()
+                else []
+            )
 
         if scope_data:
             from . import scope
@@ -598,6 +635,18 @@ def _run_scan(args):
                 print("[!] No subdomains left to probe.")
                 live = []
                 hosts_data = []
+            elif "http" not in active_stages:
+                print("[*] Skipping HTTP probe stage")
+                live = []
+                hosts_data = []
+            elif not resolve_httpx_binary():
+                print(
+                    "[!] Tool 'httpx' not found in PATH. Skipping HTTP probe stage.\n"
+                    "    Install: go install -v "
+                    "github.com/projectdiscovery/httpx/cmd/httpx@latest"
+                )
+                live = []
+                hosts_data = []
             else:
                 httpx_bin = resolve_httpx_binary() or "httpx"
                 live, hosts_data = probe_hosts(
@@ -617,6 +666,81 @@ def _run_scan(args):
                         scope_data=scope_data,
                         hosts_data=hosts_data,
                     )
+
+        if stages_arg is not None and "urls" in active_stages:
+            from .plugins import KatanaPlugin, GauPlugin, WaybackurlsPlugin
+
+            all_urls = []
+            for url_tool in [KatanaPlugin(), GauPlugin(), WaybackurlsPlugin()]:
+                if not url_tool.is_installed():
+                    print(f"[*] Tool '{url_tool.name}' not found. Skipping in URL collection.")
+                    continue
+                try:
+                    if url_tool.name in ("gau", "waybackurls"):
+                        cmd = url_tool.build_command(domain)
+                    else:
+                        live_file = out_dir / "live.txt"
+                        target = str(live_file) if live_file.exists() else domain
+                        cmd = url_tool.build_command(target)
+                    code, stdout, stderr = url_tool.run_command_safe(
+                        cmd, timeout=timeout or 300
+                    )
+                    records = url_tool.parse_output(stdout, stderr)
+                    all_urls.extend([r["url"] for r in records if "url" in r])
+                except Exception as e:
+                    print(f"[!] {url_tool.name} failed: {e}")
+            if all_urls:
+                deduped = sorted(set(all_urls))
+                (out_dir / "urls.txt").write_text(
+                    "\n".join(deduped) + "\n", encoding="utf-8"
+                )
+                print(f"[+] Collected {len(deduped)} URLs")
+
+        if stages_arg is not None and "ports" in active_stages and subs:
+            from .plugins import NaabuPlugin
+
+            naabu = NaabuPlugin()
+            if not naabu.is_installed():
+                print(
+                    f"[!] Tool 'naabu' not found in PATH. Skipping port scan stage.\n"
+                    f"    Install: {naabu.install_hint}"
+                )
+            else:
+                try:
+                    cmd = naabu.build_command(str(out_dir / "subdomains.txt"))
+                    code, stdout, stderr = naabu.run_command_safe(
+                        cmd, timeout=timeout or 600
+                    )
+                    port_records = naabu.parse_output(stdout, stderr)
+                    (out_dir / "ports.json").write_text(
+                        json.dumps(port_records, indent=2), encoding="utf-8"
+                    )
+                    print(f"[+] Found {len(port_records)} open ports")
+                except Exception as e:
+                    print(f"[!] naabu failed: {e}")
+
+        if stages_arg is not None and "vulns" in active_stages and live:
+            from .plugins import NucleiPlugin
+
+            nuclei = NucleiPlugin()
+            if not nuclei.is_installed():
+                print(
+                    f"[!] Tool 'nuclei' not found in PATH. Skipping vuln scan stage.\n"
+                    f"    Install: {nuclei.install_hint}"
+                )
+            else:
+                try:
+                    cmd = nuclei.build_command(str(out_dir / "live.txt"))
+                    code, stdout, stderr = nuclei.run_command_safe(
+                        cmd, timeout=timeout or 600
+                    )
+                    vuln_records = nuclei.parse_output(stdout, stderr)
+                    (out_dir / "vulns.json").write_text(
+                        json.dumps(vuln_records, indent=2), encoding="utf-8"
+                    )
+                    print(f"[+] Found {len(vuln_records)} findings")
+                except Exception as e:
+                    print(f"[!] nuclei failed: {e}")
 
         write_report(
             domain,

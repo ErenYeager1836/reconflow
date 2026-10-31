@@ -11,6 +11,7 @@ _reconflow() {
       "scope:Check target scope"
       "report:Regenerate reports"
       "mark:Mark a host"
+      "doctor:Check external recon toolchain and dependencies"
     )
     _describe -t commands "reconflow command" commands
     return
@@ -20,7 +21,7 @@ _reconflow() {
   previous="${words[CURRENT-1]}"
   case "$command" in
     scan)
-      flags=(-o --output --threads --timeout --keep-wildcard --json --csv -q --quiet --silent --screenshots --scope -h --help)
+      flags=(-o --output --threads --timeout --keep-wildcard --json --csv -q --quiet --silent --screenshots --scope --stages --skip -h --help)
       ;;
     diff)
       flags=(-o --output --json --notify --webhook-url -h --help)
@@ -33,6 +34,9 @@ _reconflow() {
       ;;
     mark)
       flags=(-d --domain -o --output --tested --ignore --notes --list -h --help)
+      ;;
+    doctor)
+      flags=(-h --help)
       ;;
     *) return ;;
   esac

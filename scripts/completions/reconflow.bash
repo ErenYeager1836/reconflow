@@ -9,7 +9,7 @@ _reconflow_complete() {
     previous="${COMP_WORDS[COMP_CWORD-1]}"
   fi
 
-  local -a commands=(scan diff scope report mark)
+  local -a commands=(scan diff scope report mark doctor)
   if (( COMP_CWORD == 1 )); then
     COMPREPLY=( $(compgen -W "${commands[*]} --version -v --help -h" -- "$current") )
     return
@@ -19,7 +19,7 @@ _reconflow_complete() {
   local flags=""
   case "$command" in
     scan)
-      flags="-o --output --threads --timeout --keep-wildcard --json --csv -q --quiet --silent --screenshots --scope -h --help"
+      flags="-o --output --threads --timeout --keep-wildcard --json --csv -q --quiet --silent --screenshots --scope --stages --skip -h --help"
       ;;
     diff)
       flags="-o --output --json --notify --webhook-url -h --help"
@@ -32,6 +32,9 @@ _reconflow_complete() {
       ;;
     mark)
       flags="-d --domain -o --output --tested --ignore --notes --list -h --help"
+      ;;
+    doctor)
+      flags="-h --help"
       ;;
     *) return ;;
   esac
