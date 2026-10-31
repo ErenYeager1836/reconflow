@@ -66,7 +66,7 @@ reconflow does not reinvent reconnaissance tools; it orchestrates them safely as
 
 ## Toolchain & Requirements
 
-- Python 3.8+
+- Python 3.9+
 - Supported external tools (each optional; missing tools skip their stage gracefully):
   - [`subfinder`](https://github.com/projectdiscovery/subfinder): Subdomain enumeration
   - [`httpx`](https://github.com/projectdiscovery/httpx): Live HTTP probing & technology detection

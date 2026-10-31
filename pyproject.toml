@@ -3,7 +3,10 @@ name = "reconflow"
 version = "0.4.0"
 description = "Recon pipeline for bug bounty hunters with differential change tracking"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
+dependencies = [
+    'tomli>=1.1.0;python_version<"3.11"',
+]
 license = "MIT"
 license-files= ["LICENSE"]
 authors = [
@@ -22,11 +25,11 @@ keywords = [
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Operating System :: OS Independent",
     "Topic :: Security",
     "Intended Audience :: Information Technology",
