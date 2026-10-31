@@ -81,6 +81,9 @@ def _find_binary_candidates(
                 if w_norm not in seen:
                     seen.add(w_norm)
                     candidates.append(w)
+        else:
+            seen.add(norm)
+            candidates.append(p_str)
 
     if include_override:
         override = _get_tool_override(tool_name)

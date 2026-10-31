@@ -281,7 +281,15 @@ class TestDryRunMode(unittest.TestCase):
             )
             with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout, \
                  patch.object(SubfinderPlugin, "run_command_safe") as mock_sub_run, \
-                 patch.object(HttpxPlugin, "run_command_safe") as mock_http_run:
+                 patch.object(HttpxPlugin, "run_command_safe") as mock_http_run, \
+                 patch.object(SubfinderPlugin, "is_installed", return_value=True), \
+                 patch.object(SubfinderPlugin, "get_version", return_value="v2.17.0"), \
+                 patch.object(SubfinderPlugin, "get_binary_path",
+                              return_value="/usr/bin/subfinder"), \
+                 patch.object(HttpxPlugin, "is_installed", return_value=True), \
+                 patch.object(HttpxPlugin, "get_version", return_value="v1.6.8"), \
+                 patch.object(HttpxPlugin, "get_binary_path",
+                              return_value="/usr/bin/httpx"):
                 result = scan.run(args)
                 self.assertTrue(result["dry_run"])
                 # External tool commands must never execute during dry run

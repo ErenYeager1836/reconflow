@@ -65,11 +65,6 @@ def check_tools(tools, exit_on_missing=True):
                     missing_details["httpx"] = p.get_missing_reason()
         elif shutil.which(t) is None:
             missing.append(t)
-        else:
-            p = get_plugin(t)
-            if p and not p.is_installed():
-                missing.append(t)
-                missing_details[t] = p.get_missing_reason()
 
     if missing:
         lines = [
