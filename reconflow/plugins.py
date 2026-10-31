@@ -36,7 +36,29 @@ def verify_projectdiscovery_binary(
         return False, None
 
 
-def _find_binary_candidates(tool_name: str, binary_names: List[str]) -> List[str]:
+def _get_tool_override(tool_name: str) -> Optional[str]:
+    """Check for explicit tool path in environment or reconflow.toml."""
+    env_var = f"RECONFLOW_{tool_name.upper().replace('-', '_')}"
+    val = os.environ.get(env_var)
+    if val and val.strip():
+        return val.strip()
+
+    try:
+        from .config import load_config
+        cfg = load_config()
+        tools_cfg = cfg.get("tools") or {}
+        cfg_val = tools_cfg.get(tool_name)
+        if cfg_val and str(cfg_val).strip():
+            return str(cfg_val).strip()
+    except Exception:
+        pass
+
+    return None
+
+
+def _find_binary_candidates(
+    tool_name: str, binary_names: List[str], include_override: bool = True
+) -> List[str]:
     """Find all potential binary paths for a tool across overrides, PATH, and common dirs."""
     candidates: List[str] = []
     seen: set = set()
@@ -60,22 +82,11 @@ def _find_binary_candidates(tool_name: str, binary_names: List[str]) -> List[str
                     seen.add(w_norm)
                     candidates.append(w)
 
-    # 1. Environment variable override: RECONFLOW_<NAME> (e.g. RECONFLOW_HTTPX)
-    env_var = f"RECONFLOW_{tool_name.upper().replace('-', '_')}"
-    if os.environ.get(env_var):
-        add_candidate(os.environ[env_var])
+    if include_override:
+        override = _get_tool_override(tool_name)
+        if override:
+            add_candidate(override)
 
-    # 2. Config file override from reconflow.toml: [tools] <name> = "..."
-    try:
-        from .config import load_config
-        cfg = load_config()
-        tools_cfg = cfg.get("tools") or {}
-        if tool_name in tools_cfg:
-            add_candidate(tools_cfg[tool_name])
-    except Exception:
-        pass
-
-    # 3. Search ALL candidates across PATH directories (not just the first match)
     path_dirs = os.environ.get("PATH", "").split(os.pathsep)
     extensions = [""]
     if sys.platform == "win32":
@@ -97,7 +108,6 @@ def _find_binary_candidates(tool_name: str, binary_names: List[str]) -> List[str
                 except OSError:
                     continue
 
-    # 4. Search common installation locations
     common_dirs: List[Path] = [
         Path.home() / "go" / "bin",
     ]
@@ -127,7 +137,6 @@ def _find_binary_candidates(tool_name: str, binary_names: List[str]) -> List[str
             except OSError:
                 continue
 
-    # 5. Fallback: check shutil.which for any binary names not picked up
     for bname in binary_names:
         w = shutil.which(bname)
         if w:
@@ -140,12 +149,29 @@ def resolve_tool_binary(
     tool_name: str,
     binary_names: List[str],
     validator: Optional[Callable[[str], Tuple[bool, Optional[str]]]] = None,
+    hard_fail: bool = False,
 ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """Search candidates and return (verified_path, version, clashed_path)."""
-    candidates = _find_binary_candidates(tool_name, binary_names)
+    override = _get_tool_override(tool_name)
+    if override:
+        if validator:
+            is_valid, version_str = validator(override)
+            if is_valid:
+                return override, version_str, None
+            print(
+                f"[!] Warning: couldn't verify identity of {override}",
+                file=sys.stderr,
+            )
+            return override, "installed", None
+        return override, "installed", None
+
+    candidates = _find_binary_candidates(tool_name, binary_names, include_override=False)
     clashed_path: Optional[str] = None
+    first_candidate: Optional[str] = None
 
     for cand in candidates:
+        if first_candidate is None:
+            first_candidate = cand
         if validator:
             is_valid, version_str = validator(cand)
             if is_valid:
@@ -156,7 +182,17 @@ def resolve_tool_binary(
         else:
             return cand, "installed", None
 
-    return None, None, clashed_path
+    if hard_fail:
+        return None, None, clashed_path
+
+    if first_candidate:
+        print(
+            f"[!] Warning: couldn't verify identity of {first_candidate}",
+            file=sys.stderr,
+        )
+        return first_candidate, "installed", None
+
+    return None, None, None
 
 
 def _resolve_httpx_binary() -> Optional[str]:
@@ -175,6 +211,7 @@ class ToolPlugin:
     binary: str = ""
     install_hint: str = ""
     default_timeout: int = 300
+    hard_fail: bool = False
 
     def __init__(self) -> None:
         self._resolved_path: Optional[str] = None
@@ -211,6 +248,7 @@ class ToolPlugin:
             self.name,
             self.get_binary_names(),
             validator=self.verify_binary,
+            hard_fail=self.hard_fail,
         )
         self._resolved_path = bin_path
         self._resolved_version = version_str
@@ -316,6 +354,8 @@ class ToolPlugin:
 class ProjectDiscoveryPlugin(ToolPlugin):
     """Base class for ProjectDiscovery suite plugins with -version identity verification."""
 
+    hard_fail: bool = False
+
     def verify_binary(self, bin_path: str) -> Tuple[bool, Optional[str]]:
         return verify_projectdiscovery_binary(bin_path, timeout=3)
 
@@ -323,7 +363,7 @@ class ProjectDiscoveryPlugin(ToolPlugin):
         clashed = self.get_clashed_path()
         if clashed:
             return (
-                f"{self.name} found at {clashed} but it is not ProjectDiscovery {self.name}. "
+                f"{self.name} found at {clashed} but failed verification check. "
                 f"Install: {self.install_hint}, or set the path in reconflow.toml."
             )
         return f"Install: {self.install_hint}"
@@ -425,6 +465,7 @@ class HttpxPlugin(ProjectDiscoveryPlugin):
     binary = "httpx"
     install_hint = "go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest"
     default_timeout = 600
+    hard_fail: bool = True
 
     def get_binary_names(self) -> List[str]:
         return ["httpx-toolkit", "httpx"]
@@ -551,28 +592,6 @@ class GauPlugin(ToolPlugin):
     name = "gau"
     stage = "urls"
     binary = "gau"
-
-    def verify_binary(self, bin_path: str) -> Tuple[bool, Optional[str]]:
-        try:
-            res = subprocess.run(
-                [bin_path, "--version"],
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=3,
-            )
-            combined = (res.stdout + "\n" + res.stderr).lower()
-            if "gau" in combined or "version" in combined:
-                pattern = r"version:\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?)"
-                match = re.search(pattern, res.stdout + "\n" + res.stderr, re.IGNORECASE)
-                if match:
-                    return True, f"v{match.group(1)}"
-                return True, "installed"
-            return False, None
-        except Exception:
-            return False, None
     install_hint = "go install github.com/lc/gau/v2/cmd/gau@latest"
     default_timeout = 300
 

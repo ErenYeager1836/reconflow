@@ -2,6 +2,7 @@
 
 import json
 import os
+import subprocess
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
@@ -343,6 +344,78 @@ class TestHttpxCollisionResolution(unittest.TestCase):
         path = sub_plugin.resolve(force=True)
         self.assertEqual(path, "/usr/bin/subfinder")
         self.assertTrue(sub_plugin.is_installed())
+
+    def test_identity_check_case_insensitive(self):
+        """Identity check recognizes ProjectDiscovery in mixed/uppercase."""
+        from reconflow.plugins import verify_projectdiscovery_binary
+
+        with patch("subprocess.run") as mock_run:
+            mock_proc = MagicMock()
+            mock_proc.stdout = "PROJECTDISCOVERY.IO\nCURRENT VERSION: V2.5.0\n"
+            mock_proc.stderr = ""
+            mock_proc.returncode = 0
+            mock_run.return_value = mock_proc
+            valid, ver = verify_projectdiscovery_binary("/bin/tool")
+            self.assertTrue(valid)
+            self.assertEqual(ver, "v2.5.0")
+
+    @patch("subprocess.run")
+    @patch("reconflow.plugins._find_binary_candidates")
+    def test_non_httpx_pd_tool_fails_verification_warns_and_still_used(
+        self, mock_candidates, mock_run
+    ):
+        """Tools other than httpx warn and are still used if verification fails/times out."""
+        import io
+        from reconflow.plugins import SubfinderPlugin
+
+        sub = SubfinderPlugin()
+        sub.reset_resolution()
+        mock_candidates.return_value = ["/usr/bin/subfinder"]
+        mock_run.side_effect = subprocess.TimeoutExpired(
+            cmd=["subfinder", "-version"], timeout=3
+        )
+
+        with patch("sys.stderr", new_callable=io.StringIO) as mock_err:
+            path = sub.resolve(force=True)
+            self.assertEqual(path, "/usr/bin/subfinder")
+            self.assertTrue(sub.is_installed())
+            self.assertIn("couldn't verify identity of /usr/bin/subfinder", mock_err.getvalue())
+
+    @patch("subprocess.run")
+    @patch.dict(os.environ, {"RECONFLOW_HTTPX": "/custom/bin/my_httpx"})
+    def test_override_fails_verification_warns_and_still_used(self, mock_run):
+        """Explicit env or config override warns and is still used even if check fails."""
+        import io
+
+        mock_proc = MagicMock()
+        mock_proc.stdout = "Unknown custom binary"
+        mock_proc.stderr = ""
+        mock_proc.returncode = 1
+        mock_run.return_value = mock_proc
+
+        with patch("sys.stderr", new_callable=io.StringIO) as mock_err:
+            path = self.plugin.resolve(force=True)
+            self.assertEqual(path, "/custom/bin/my_httpx")
+            self.assertTrue(self.plugin.is_installed())
+            self.assertIn("couldn't verify identity of /custom/bin/my_httpx", mock_err.getvalue())
+
+    @patch("reconflow.plugins.verify_projectdiscovery_binary")
+    @patch("shutil.which")
+    def test_waybackurls_and_gau_do_not_run_pd_check(self, mock_which, mock_pd_verify):
+        """waybackurls and gau do not inherit from ProjectDiscoveryPlugin or run PD check."""
+        from reconflow.plugins import GauPlugin, ProjectDiscoveryPlugin, WaybackurlsPlugin
+
+        wb = WaybackurlsPlugin()
+        gau = GauPlugin()
+        self.assertNotIsInstance(wb, ProjectDiscoveryPlugin)
+        self.assertNotIsInstance(gau, ProjectDiscoveryPlugin)
+
+        mock_which.return_value = "/bin/tool"
+        wb.reset_resolution()
+        wb.resolve(force=True)
+        gau.reset_resolution()
+        gau.resolve(force=True)
+        mock_pd_verify.assert_not_called()
 
 
 if __name__ == "__main__":
