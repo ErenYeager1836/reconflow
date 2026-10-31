@@ -1,6 +1,7 @@
 """Unit tests for tool plugins, execution safety, and record normalization."""
 
 import json
+import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -24,7 +25,7 @@ class TestToolPluginBase(unittest.TestCase):
 
     def test_run_command_safe_success(self):
         plugin = SubfinderPlugin()
-        code, stdout, stderr = plugin.run_command_safe(["python3", "-c", "print('hello recon')"])
+        code, stdout, stderr = plugin.run_command_safe([sys.executable, "-c", "print('hello recon')"])
         self.assertEqual(code, 0)
         self.assertEqual(stdout.strip(), "hello recon")
         self.assertEqual(stderr, "")
@@ -32,7 +33,7 @@ class TestToolPluginBase(unittest.TestCase):
     def test_run_command_safe_with_stdin(self):
         plugin = SubfinderPlugin()
         code, stdout, stderr = plugin.run_command_safe(
-            ["python3", "-c", "import sys; print(sys.stdin.read().upper().strip())"],
+            [sys.executable, "-c", "import sys; print(sys.stdin.read().upper().strip())"],
             input_data="stdin content",
         )
         self.assertEqual(code, 0)
@@ -41,7 +42,7 @@ class TestToolPluginBase(unittest.TestCase):
     def test_run_command_safe_timeout(self):
         plugin = SubfinderPlugin()
         code, stdout, stderr = plugin.run_command_safe(
-            ["python3", "-c", "import time; time.sleep(5)"],
+            [sys.executable, "-c", "import time; time.sleep(5)"],
             timeout=1,
         )
         self.assertEqual(code, -1)

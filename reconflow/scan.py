@@ -1024,6 +1024,8 @@ def _run_scan(args):
             print(f"  • Output Directory:  {out_dir}")
             print("=" * 55 + "\n")
 
+        import gc
+        gc.collect()
         return {
             "domain": domain,
             "run_id": run_id,
