@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from argparse import Namespace
 from pathlib import Path
+from unittest.mock import patch
 
 from reconflow import config, notify, report
 
@@ -71,6 +72,22 @@ class TestConfig(unittest.TestCase):
         args = Namespace(threads=15)
         updated = config.apply_config_to_args(args, parsed)
         self.assertEqual(updated.threads, 15)
+
+    def test_config_degrades_correctly_when_tomllib_missing(self):
+        # 1. No config file found: should return empty dict without crashing
+        with patch("reconflow.config.tomllib", None):
+            res = config.load_config(explicit_path="nonexistent_reconflow.toml")
+            self.assertEqual(res, {})
+
+        # 2. Config file exists: should exit with helpful error message
+        self.cfg_file.write_text("[general]\nthreads = 10\n", encoding="utf-8")
+        with patch("reconflow.config.tomllib", None):
+            with self.assertRaises(SystemExit) as cm:
+                config.load_config(str(self.cfg_file))
+            self.assertIn(
+                "config files need Python 3.11+ or `pip install tomli`",
+                str(cm.exception),
+            )
 
 
 class TestSARIFReport(unittest.TestCase):

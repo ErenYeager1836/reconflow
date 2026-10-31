@@ -6,6 +6,7 @@ configuration file settings.
 """
 
 import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -16,60 +17,7 @@ except ImportError:
     try:
         import tomli as tomllib  # type: ignore
     except ImportError:
-        tomllib = None  # Handled by _simple_toml_fallback
-
-
-def _simple_toml_fallback(content: str) -> Dict[str, Any]:
-    """Lightweight fallback parser for basic TOML syntax when tomllib is absent."""
-    result: Dict[str, Any] = {}
-    current_section = result
-
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-
-        if line.startswith("[") and line.endswith("]"):
-            section_name = line[1:-1].strip()
-            result[section_name] = {}
-            current_section = result[section_name]
-            continue
-
-        if "=" in line:
-            key, val_str = line.split("=", 1)
-            key = key.strip()
-            val_str = val_str.strip()
-
-            # Strip inline comments
-            if "#" in val_str and not (val_str.startswith('"') or val_str.startswith("'")):
-                val_str = val_str.split("#", 1)[0].strip()
-
-            val: Any
-            if val_str.lower() in ("true", "yes", "on"):
-                val = True
-            elif val_str.lower() in ("false", "no", "off"):
-                val = False
-            elif val_str.isdigit():
-                val = int(val_str)
-            elif (val_str.startswith('"') and val_str.endswith('"')) or (
-                val_str.startswith("'") and val_str.endswith("'")
-            ):
-                val = val_str[1:-1]
-            elif val_str.startswith("[") and val_str.endswith("]"):
-                # Simple list of strings/ints
-                inner = val_str[1:-1].strip()
-                items = [
-                    item.strip().strip('"').strip("'")
-                    for item in inner.split(",")
-                    if item.strip()
-                ]
-                val = items
-            else:
-                val = val_str
-
-            current_section[key] = val
-
-    return result
+        tomllib = None
 
 
 def find_config_file(explicit_path: Optional[str] = None) -> Optional[Path]:
@@ -103,11 +51,12 @@ def load_config(explicit_path: Optional[str] = None) -> Dict[str, Any]:
     if not cfg_file:
         return {}
 
+    if tomllib is None:
+        sys.exit("config files need Python 3.11+ or `pip install tomli`")
+
     try:
         content = cfg_file.read_text(encoding="utf-8")
-        if tomllib is not None:
-            return tomllib.loads(content)
-        return _simple_toml_fallback(content)
+        return tomllib.loads(content)
     except Exception as e:
         print(f"[!] Warning: Failed to parse config file {cfg_file}: {e}")
         return {}
