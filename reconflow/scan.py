@@ -979,6 +979,14 @@ def _run_scan(args):
             findings=vuln_records,
             stages_completed=completed_stages,
         )
+        if vuln_records:
+            try:
+                from .report import export_sarif
+
+                export_sarif(domain, vuln_records, out_dir)
+            except Exception:
+                pass
+
         try:
             from . import db
 
@@ -986,6 +994,19 @@ def _run_scan(args):
         except Exception:
             pass
         print(f"[+] Saved scan snapshot ({run_id})")
+
+        if not getattr(args, "silent", False):
+            print("\n" + "=" * 55)
+            print(f"📊 Scan Summary: {domain} [{run_id}]")
+            print("=" * 55)
+            print(f"  • Subdomains:        {len(subs)}")
+            print(f"  • Probed Live Hosts: {len(live)}")
+            print(f"  • URLs / Endpoints:  {len(all_urls)}")
+            print(f"  • Open Ports:        {len(port_records)}")
+            print(f"  • Findings:          {len(vuln_records)}")
+            print(f"  • Stages Completed:  {', '.join(completed_stages) or 'none'}")
+            print(f"  • Output Directory:  {out_dir}")
+            print("=" * 55 + "\n")
 
         return {
             "domain": domain,

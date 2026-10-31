@@ -137,3 +137,72 @@ def send_webhook(
             success = False
 
     return success
+
+
+def format_diff_digest(domain: str, diff_result: dict) -> str:
+    """Format a concise digest of new discoveries only for webhook delivery."""
+    lines = [f"🛰️ **reconflow alert: {domain}**", ""]
+    new_subs = diff_result.get("new_subdomains", [])
+    new_live = diff_result.get("new_live", [])
+    new_ports = diff_result.get("new_ports", {})
+    new_urls = diff_result.get("new_urls", [])
+    new_findings = diff_result.get("new_findings", [])
+    lead_hints = diff_result.get("lead_hints", {})
+
+    has_new = any([new_subs, new_live, new_ports, new_urls, new_findings])
+    if not has_new:
+        lines.append("No new assets or findings detected in latest scan.")
+        return "\n".join(lines)
+
+    if new_subs:
+        lines.append(f"**New Subdomains ({len(new_subs)}):**")
+        for s in new_subs[:10]:
+            lines.append(f"• `{s}`")
+        if len(new_subs) > 10:
+            lines.append(f"... and {len(new_subs) - 10} more")
+        lines.append("")
+
+    if new_live:
+        lines.append(f"**New Live Hosts ({len(new_live)}):**")
+        for h in new_live[:10]:
+            lines.append(f"• {h}")
+        if len(new_live) > 10:
+            lines.append(f"... and {len(new_live) - 10} more")
+        lines.append("")
+
+    if new_ports:
+        lines.append(f"**New Open Ports ({len(new_ports)} hosts):**")
+        for host, ports in list(new_ports.items())[:10]:
+            lines.append(f"• `{host}`: {', '.join(str(p) for p in ports)}")
+        lines.append("")
+
+    if new_urls:
+        lines.append(f"**New Endpoints ({len(new_urls)}):**")
+        for u in new_urls[:10]:
+            lines.append(f"• `{u}`")
+        if len(new_urls) > 10:
+            lines.append(f"... and {len(new_urls) - 10} more")
+        lines.append("")
+
+    if new_findings:
+        lines.append(f"**Vulnerability Findings ({len(new_findings)}):**")
+        for f in new_findings[:10]:
+            sev = (f.get("severity") or "info").upper()
+            name = f.get("name") or f.get("template_id") or "Finding"
+            host = f.get("host") or ""
+            lines.append(f"• [{sev}] **{name}** on `{host}`")
+        lines.append("")
+
+    if lead_hints:
+        lines.append("**Top Lead Hints:**")
+        count = 0
+        for url, hints in lead_hints.items():
+            for h in hints:
+                lines.append(f"• `{url}`: {h}")
+                count += 1
+                if count >= 5:
+                    break
+            if count >= 5:
+                break
+
+    return "\n".join(lines).strip()

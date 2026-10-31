@@ -57,6 +57,88 @@ def export_csv(target, live_hosts, output_dir):
     return path
 
 
+def export_sarif(domain: str, findings: list, output_dir) -> Path:
+    """Export findings to report.sarif (SARIF v2.1.0)."""
+    directory = Path(output_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "report.sarif"
+    sarif_data = build_sarif_report(domain, findings or [])
+    path.write_text(json.dumps(sarif_data, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def build_sarif_report(domain: str, findings: list) -> dict:
+    """Construct structured SARIF v2.1.0 document from findings."""
+    rules = []
+    results = []
+    seen_rules = set()
+
+    level_map = {
+        "critical": "error",
+        "high": "error",
+        "medium": "warning",
+        "low": "note",
+        "info": "note",
+    }
+
+    for f in findings or []:
+        if not isinstance(f, dict):
+            continue
+        tid = f.get("template_id") or f.get("template-id") or "reconflow-finding"
+        name = f.get("name") or tid
+        sev = (f.get("severity") or "info").lower()
+        level = level_map.get(sev, "note")
+        desc = f.get("description") or f.get("reason") or name
+        host = f.get("host") or domain
+        matched_at = f.get("matched_at") or f.get("url") or host
+
+        if tid not in seen_rules:
+            seen_rules.add(tid)
+            rules.append({
+                "id": tid,
+                "name": name,
+                "shortDescription": {"text": name},
+                "fullDescription": {"text": desc},
+                "defaultConfiguration": {"level": level},
+            })
+
+        results.append({
+            "ruleId": tid,
+            "level": level,
+            "message": {"text": f"Finding on {host}: {name}"},
+            "locations": [
+                {
+                    "physicalLocation": {
+                        "artifactLocation": {
+                            "uri": matched_at,
+                        }
+                    }
+                }
+            ],
+        })
+
+    return {
+        "$schema": (
+            "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/"
+            "sarif-schema-2.1.0.json"
+        ),
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "reconflow",
+                        "version": "0.4.0",
+                        "informationUri": "https://github.com/erenyeager/reconflow",
+                        "rules": rules,
+                    }
+                },
+                "results": results,
+            }
+        ],
+    }
+
+
 def format_host_display(host: dict) -> str:
     """Format a host dictionary into a human-readable summary line."""
     url = host.get("url", "")
@@ -173,16 +255,30 @@ def run(args):
     hosts = snapshot.get("hosts", [])
     status = snapshot.get("status", "complete")
 
+    findings = snapshot.get("findings", [])
+
     md_report = build_markdown_report(domain, run_id, timestamp, subs, hosts, status=status)
     json_data = build_json_report(domain, run_id, timestamp, subs, hosts, status=status)
+    sarif_data = build_sarif_report(domain, findings)
 
     # Write regenerated reports to out_dir
     (out_dir / "report.md").write_text(md_report, encoding="utf-8")
     (out_dir / "report.json").write_text(
         json.dumps(json_data, indent=2) + "\n", encoding="utf-8"
     )
+    export_csv(domain, hosts, out_dir)
+    export_sarif(domain, findings, out_dir)
 
-    if json_output:
+    raw_fmt = getattr(args, "format", None)
+    fmt = str(raw_fmt).lower().strip() if isinstance(raw_fmt, str) and raw_fmt else None
+    if not fmt:
+        fmt = "json" if json_output else "md"
+
+    if fmt == "sarif":
+        print(json.dumps(sarif_data, indent=2))
+    elif fmt == "csv":
+        print((out_dir / "report.csv").read_text(encoding="utf-8"))
+    elif fmt == "json":
         print(json.dumps(json_data, indent=2))
     else:
         print(md_report)

@@ -19,7 +19,7 @@ _reconflow_complete() {
   local flags=""
   case "$command" in
     scan)
-      flags="-o --output --threads --timeout --keep-wildcard --json --csv -q --quiet --silent --screenshots --scope --stages --skip --rate --dry-run --resume --intrusive --all-vulns -h --help"
+      flags="-o --output --threads --timeout --keep-wildcard --json --csv -q --quiet --silent --screenshots --scope --stages --skip --rate --dry-run --resume --intrusive --all-vulns -c --config -h --help"
       ;;
     diff)
       flags="-o --output --json --notify --webhook-url -h --help"
@@ -28,7 +28,7 @@ _reconflow_complete() {
       flags="-h --help"
       ;;
     report)
-      flags="-o --output --run --json -h --help"
+      flags="-o --output --run --json --format -h --help"
       ;;
     mark)
       flags="-d --domain -o --output --tested --ignore --notes --list -h --help"

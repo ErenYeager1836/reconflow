@@ -120,6 +120,11 @@ def build_parser():
         action="store_true",
         help="Alias for --intrusive to run all vulnerability templates",
     )
+    p_scan.add_argument(
+        "-c", "--config",
+        default=None,
+        help="Path to custom reconflow.toml config file",
+    )
 
     # diff subcommand
     p_diff = subparsers.add_parser(
@@ -203,6 +208,12 @@ def build_parser():
         dest="json_report",
         help="Output regenerated report as JSON",
     )
+    p_report.add_argument(
+        "--format",
+        choices=["md", "csv", "json", "sarif"],
+        default=None,
+        help="Report output format (md, csv, json, sarif)",
+    )
 
     # mark subcommand
     p_mark = subparsers.add_parser(
@@ -268,6 +279,13 @@ def main(args=None):
     """Main entrypoint for CLI command dispatch."""
     parser = build_parser()
     parsed_args = parser.parse_args(args)
+
+    from . import config
+
+    cfg_path = getattr(parsed_args, "config", None)
+    cfg = config.load_config(cfg_path)
+    if cfg:
+        parsed_args = config.apply_config_to_args(parsed_args, cfg)
 
     if parsed_args.command == "scan":
         scan.run(parsed_args)
