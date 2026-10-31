@@ -33,6 +33,25 @@ class TestDoctor(unittest.TestCase):
             self.assertEqual(cm.exception.code, 0)
             self.assertTrue(mock_check.called)
 
+    def test_doctor_httpx_clash_message(self):
+        """Doctor reports clear name clash message when only Python httpx is found."""
+        from reconflow.plugins import get_plugin
+
+        httpx_plugin = get_plugin("httpx")
+        reason = (
+            "httpx found at /usr/bin/httpx but it is not ProjectDiscovery httpx "
+            "(name clash with the Python httpx CLI). Install: go install -v "
+            "github.com/projectdiscovery/httpx/cmd/httpx@latest, or set the path in "
+            "reconflow.toml."
+        )
+        with patch.object(httpx_plugin, "is_installed", return_value=False), \
+             patch.object(httpx_plugin, "get_missing_reason", return_value=reason), \
+             patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+            check_toolchain()
+            out = mock_out.getvalue()
+            self.assertIn("name clash with the Python httpx CLI", out)
+            self.assertIn("/usr/bin/httpx", out)
+
 
 if __name__ == "__main__":
     unittest.main()

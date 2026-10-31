@@ -33,7 +33,7 @@ def check_toolchain() -> int:
         else:
             status = "[MISSING]"
             version = "-"
-            info = f"Install: {p.install_hint}"
+            info = p.get_missing_reason()
 
         print(f"{p.name:<13} {p.stage:<12} {status:<10} {version:<12} {info}")
 

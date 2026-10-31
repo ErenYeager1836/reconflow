@@ -1,50 +1,169 @@
 """reconflow.plugins - Tool plugins for external recon binaries."""
 
 import json
+import os
 import re
 import shutil
 import subprocess
-from typing import Any, Dict, List, Optional, Tuple
+import sys
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+
+def verify_projectdiscovery_binary(
+    bin_path: str, timeout: int = 3
+) -> Tuple[bool, Optional[str]]:
+    """Verify that bin_path is a ProjectDiscovery binary via -version."""
+    try:
+        res = subprocess.run(
+            [bin_path, "-version"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+        combined = (res.stdout + "\n" + res.stderr)
+        combined_lower = combined.lower()
+        if "projectdiscovery" in combined_lower or "current version" in combined_lower:
+            pattern = r"(?:Current Version:?|version:?|v)\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?)"
+            match = re.search(pattern, combined, re.IGNORECASE)
+            version_str = f"v{match.group(1)}" if match else "installed"
+            return True, version_str
+        return False, None
+    except Exception:
+        return False, None
+
+
+def _find_binary_candidates(tool_name: str, binary_names: List[str]) -> List[str]:
+    """Find all potential binary paths for a tool across overrides, PATH, and common dirs."""
+    candidates: List[str] = []
+    seen: set = set()
+
+    def add_candidate(raw_path: Any) -> None:
+        if not raw_path:
+            return
+        p_str = str(raw_path)
+        norm = os.path.normcase(os.path.abspath(p_str))
+        if norm in seen:
+            return
+        p = Path(p_str).expanduser()
+        if p.is_file():
+            seen.add(norm)
+            candidates.append(p_str)
+        elif not p.is_absolute() and len(p.parts) == 1:
+            w = shutil.which(p_str)
+            if w:
+                w_norm = os.path.normcase(os.path.abspath(w))
+                if w_norm not in seen:
+                    seen.add(w_norm)
+                    candidates.append(w)
+
+    # 1. Environment variable override: RECONFLOW_<NAME> (e.g. RECONFLOW_HTTPX)
+    env_var = f"RECONFLOW_{tool_name.upper().replace('-', '_')}"
+    if os.environ.get(env_var):
+        add_candidate(os.environ[env_var])
+
+    # 2. Config file override from reconflow.toml: [tools] <name> = "..."
+    try:
+        from .config import load_config
+        cfg = load_config()
+        tools_cfg = cfg.get("tools") or {}
+        if tool_name in tools_cfg:
+            add_candidate(tools_cfg[tool_name])
+    except Exception:
+        pass
+
+    # 3. Search ALL candidates across PATH directories (not just the first match)
+    path_dirs = os.environ.get("PATH", "").split(os.pathsep)
+    extensions = [""]
+    if sys.platform == "win32":
+        pathext = os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD").split(";")
+        extensions = [""] + [ext.lower() for ext in pathext if ext]
+
+    for bname in binary_names:
+        for d in path_dirs:
+            if not d.strip():
+                continue
+            dir_path = Path(d).expanduser()
+            if not dir_path.is_dir():
+                continue
+            for ext in extensions:
+                target_file = dir_path / f"{bname}{ext}"
+                try:
+                    if target_file.is_file() and os.access(str(target_file), os.X_OK):
+                        add_candidate(str(target_file))
+                except OSError:
+                    continue
+
+    # 4. Search common installation locations
+    common_dirs: List[Path] = [
+        Path.home() / "go" / "bin",
+    ]
+    gopath = os.environ.get("GOPATH")
+    if gopath:
+        common_dirs.append(Path(gopath) / "bin")
+
+    if sys.platform == "win32":
+        common_dirs.append(Path(r"C:\Tools\recon"))
+        common_dirs.append(Path(r"C:\ProgramData\chocolatey\bin"))
+    else:
+        common_dirs.extend([
+            Path("/usr/local/bin"),
+            Path("/usr/bin"),
+            Path.home() / ".local" / "bin",
+        ])
+
+    for bname in binary_names:
+        for cdir in common_dirs:
+            try:
+                if not cdir.is_dir():
+                    continue
+                for ext in extensions:
+                    target_file = cdir / f"{bname}{ext}"
+                    if target_file.is_file() and os.access(str(target_file), os.X_OK):
+                        add_candidate(str(target_file))
+            except OSError:
+                continue
+
+    # 5. Fallback: check shutil.which for any binary names not picked up
+    for bname in binary_names:
+        w = shutil.which(bname)
+        if w:
+            add_candidate(w)
+
+    return candidates
+
+
+def resolve_tool_binary(
+    tool_name: str,
+    binary_names: List[str],
+    validator: Optional[Callable[[str], Tuple[bool, Optional[str]]]] = None,
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Search candidates and return (verified_path, version, clashed_path)."""
+    candidates = _find_binary_candidates(tool_name, binary_names)
+    clashed_path: Optional[str] = None
+
+    for cand in candidates:
+        if validator:
+            is_valid, version_str = validator(cand)
+            if is_valid:
+                return cand, version_str, clashed_path
+            else:
+                if clashed_path is None:
+                    clashed_path = cand
+        else:
+            return cand, "installed", None
+
+    return None, None, clashed_path
 
 
 def _resolve_httpx_binary() -> Optional[str]:
     """Find and verify ProjectDiscovery httpx binary."""
-    for candidate in ["httpx-toolkit", "httpx"]:
-        if shutil.which(candidate) is None:
-            continue
-        try:
-            res = subprocess.run(
-                [candidate, "-version"],
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=5,
-            )
-            out = (res.stdout + " " + res.stderr).lower()
-            if "projectdiscovery" in out or candidate == "httpx-toolkit":
-                return candidate
-        except Exception:
-            pass
-
-    if shutil.which("httpx"):
-        try:
-            res = subprocess.run(
-                ["httpx", "-h"],
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=5,
-            )
-            out = (res.stdout + " " + res.stderr).lower()
-            if "projectdiscovery" in out or "-status-code" in out:
-                return "httpx"
-        except Exception:
-            pass
-        return "httpx"
+    p = get_plugin("httpx")
+    if p:
+        return p.get_binary_path()
     return None
 
 
@@ -57,18 +176,78 @@ class ToolPlugin:
     install_hint: str = ""
     default_timeout: int = 300
 
+    def __init__(self) -> None:
+        self._resolved_path: Optional[str] = None
+        self._resolved_version: Optional[str] = None
+        self._clashed_path: Optional[str] = None
+        self._resolution_done: bool = False
+
+    def reset_resolution(self) -> None:
+        """Reset cached resolution state."""
+        self._resolved_path = None
+        self._resolved_version = None
+        self._clashed_path = None
+        self._resolution_done = False
+
+    def get_binary_names(self) -> List[str]:
+        """Return list of acceptable binary names to search."""
+        return [self.binary]
+
+    def verify_binary(self, bin_path: str) -> Tuple[bool, Optional[str]]:
+        """Verify binary identity and extract version.
+
+        Subclasses should override this with tool-specific checks.
+        """
+        if shutil.which(bin_path) is not None or Path(bin_path).is_file():
+            return True, "installed"
+        return False, None
+
+    def resolve(self, force: bool = False) -> Optional[str]:
+        """Resolve and verify binary path."""
+        if self._resolution_done and not force:
+            return self._resolved_path
+
+        bin_path, version_str, clashed = resolve_tool_binary(
+            self.name,
+            self.get_binary_names(),
+            validator=self.verify_binary,
+        )
+        self._resolved_path = bin_path
+        self._resolved_version = version_str
+        self._clashed_path = clashed
+        self._resolution_done = True
+        return self._resolved_path
+
     def is_installed(self) -> bool:
-        """Check whether the required binary is available on PATH."""
-        return shutil.which(self.binary) is not None
+        """Check whether the verified binary is available."""
+        return self.resolve() is not None
 
     def get_binary_path(self) -> Optional[str]:
-        """Return the absolute path to the binary if installed, else None."""
-        return shutil.which(self.binary)
+        """Return the absolute path to the verified binary if installed, else None."""
+        return self.resolve()
+
+    def get_clashed_path(self) -> Optional[str]:
+        """Return path of a shadowed or failed candidate, if one was found."""
+        self.resolve()
+        return self._clashed_path
+
+    def get_missing_reason(self) -> str:
+        """Return an informative message when binary is missing or failed verification."""
+        clashed = self.get_clashed_path()
+        if clashed:
+            return (
+                f"{self.name} found at {clashed} but failed verification check. "
+                f"Install: {self.install_hint}, or set the path in reconflow.toml."
+            )
+        return f"Install: {self.install_hint}"
 
     def get_version(self) -> str:
         """Query the tool version safely. Returns 'unknown' or 'not installed' on error."""
         if not self.is_installed():
             return "not installed"
+        if self._resolved_version and self._resolved_version != "installed":
+            return self._resolved_version
+
         try:
             bin_path = self.get_binary_path() or self.binary
             res = subprocess.run(
@@ -134,7 +313,23 @@ class ToolPlugin:
         raise NotImplementedError
 
 
-class SubfinderPlugin(ToolPlugin):
+class ProjectDiscoveryPlugin(ToolPlugin):
+    """Base class for ProjectDiscovery suite plugins with -version identity verification."""
+
+    def verify_binary(self, bin_path: str) -> Tuple[bool, Optional[str]]:
+        return verify_projectdiscovery_binary(bin_path, timeout=3)
+
+    def get_missing_reason(self) -> str:
+        clashed = self.get_clashed_path()
+        if clashed:
+            return (
+                f"{self.name} found at {clashed} but it is not ProjectDiscovery {self.name}. "
+                f"Install: {self.install_hint}, or set the path in reconflow.toml."
+            )
+        return f"Install: {self.install_hint}"
+
+
+class SubfinderPlugin(ProjectDiscoveryPlugin):
     """Subdomain enumeration plugin using ProjectDiscovery's subfinder."""
 
     name = "subfinder"
@@ -168,7 +363,7 @@ class SubfinderPlugin(ToolPlugin):
         return records
 
 
-class DnsxPlugin(ToolPlugin):
+class DnsxPlugin(ProjectDiscoveryPlugin):
     """DNS resolution and reconnaissance plugin using ProjectDiscovery's dnsx."""
 
     name = "dnsx"
@@ -222,7 +417,7 @@ class DnsxPlugin(ToolPlugin):
         return records
 
 
-class HttpxPlugin(ToolPlugin):
+class HttpxPlugin(ProjectDiscoveryPlugin):
     """HTTP probing and technology detection plugin using ProjectDiscovery's httpx."""
 
     name = "httpx"
@@ -231,14 +426,19 @@ class HttpxPlugin(ToolPlugin):
     install_hint = "go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest"
     default_timeout = 600
 
-    def is_installed(self) -> bool:
-        return _resolve_httpx_binary() is not None
+    def get_binary_names(self) -> List[str]:
+        return ["httpx-toolkit", "httpx"]
 
-    def get_binary_path(self) -> Optional[str]:
-        bin_name = _resolve_httpx_binary()
-        if bin_name:
-            return shutil.which(bin_name) or bin_name
-        return None
+    def get_missing_reason(self) -> str:
+        clashed = self.get_clashed_path()
+        if clashed:
+            return (
+                f"httpx found at {clashed} but it is not ProjectDiscovery httpx "
+                "(name clash with the Python httpx CLI). Install: go install -v "
+                "github.com/projectdiscovery/httpx/cmd/httpx@latest, or set the path in "
+                "reconflow.toml."
+            )
+        return f"Install: {self.install_hint}"
 
     def build_command(self, target: Any, **kwargs) -> List[str]:
         bin_path = self.get_binary_path() or "httpx"
@@ -293,7 +493,7 @@ class HttpxPlugin(ToolPlugin):
         return records
 
 
-class KatanaPlugin(ToolPlugin):
+class KatanaPlugin(ProjectDiscoveryPlugin):
     """Web crawler and spider plugin using ProjectDiscovery's katana."""
 
     name = "katana"
@@ -351,6 +551,28 @@ class GauPlugin(ToolPlugin):
     name = "gau"
     stage = "urls"
     binary = "gau"
+
+    def verify_binary(self, bin_path: str) -> Tuple[bool, Optional[str]]:
+        try:
+            res = subprocess.run(
+                [bin_path, "--version"],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=3,
+            )
+            combined = (res.stdout + "\n" + res.stderr).lower()
+            if "gau" in combined or "version" in combined:
+                pattern = r"version:\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?)"
+                match = re.search(pattern, res.stdout + "\n" + res.stderr, re.IGNORECASE)
+                if match:
+                    return True, f"v{match.group(1)}"
+                return True, "installed"
+            return False, None
+        except Exception:
+            return False, None
     install_hint = "go install github.com/lc/gau/v2/cmd/gau@latest"
     default_timeout = 300
 
@@ -426,7 +648,7 @@ class WaybackurlsPlugin(ToolPlugin):
         return records
 
 
-class NaabuPlugin(ToolPlugin):
+class NaabuPlugin(ProjectDiscoveryPlugin):
     """Fast port scanner plugin using ProjectDiscovery's naabu."""
 
     name = "naabu"
@@ -472,7 +694,7 @@ class NaabuPlugin(ToolPlugin):
         return records
 
 
-class NucleiPlugin(ToolPlugin):
+class NucleiPlugin(ProjectDiscoveryPlugin):
     """Vulnerability scanner plugin using ProjectDiscovery's nuclei."""
 
     name = "nuclei"
@@ -567,3 +789,9 @@ def get_plugins_for_stage(stage: str) -> List[ToolPlugin]:
     """Return all plugins registered for a specific stage."""
     stage_norm = stage.strip().lower()
     return [p for p in ALL_PLUGINS if p.stage == stage_norm]
+
+
+def reset_all_plugins() -> None:
+    """Reset cached binary resolution across all registered plugins."""
+    for p in ALL_PLUGINS:
+        p.reset_resolution()

@@ -256,11 +256,16 @@ class Pipeline:
             print(f"  {idx}. {stage:<12} [tools: {plugin_names}]")
             for p in plugins:
                 installed = p.is_installed()
-                status = (
-                    f"[OK: {p.get_binary_path() or p.binary}]"
-                    if installed
-                    else "[MISSING: will skip]"
-                )
+                if installed:
+                    ver = p.get_version()
+                    ver_str = (
+                        f" (version: {ver})"
+                        if ver and ver not in ("not installed", "unknown")
+                        else ""
+                    )
+                    status = f"[OK: {p.get_binary_path() or p.binary}{ver_str}]"
+                else:
+                    status = f"[MISSING: {p.get_missing_reason()}]"
 
                 if stage == "subdomains":
                     target = domain

@@ -1,6 +1,6 @@
 [project]
 name = "reconflow"
-version = "0.4.0"
+version = "0.4.1"
 description = "Recon pipeline for bug bounty hunters with differential change tracking"
 readme = "README.md"
 requires-python = ">=3.9"

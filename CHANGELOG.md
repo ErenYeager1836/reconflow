@@ -2,6 +2,16 @@
 
 All notable changes to `reconflow` will be documented in this file.
 
+## [0.4.1] - 2026-10-31
+
+### Fixed
+- **Resolved `httpx` Name Collision**:
+  - Implemented multi-candidate binary resolution searching PATH, `RECONFLOW_HTTPX`, `reconflow.toml`, and common installation paths (`~/go/bin`, `$GOPATH/bin`, `C:\\Tools\\recon`).
+  - Added `-version` identity verification checking for `"projectdiscovery"` or `"Current Version"` to prevent Python's `httpx` CLI from shadowing ProjectDiscovery's binary.
+  - Added clear diagnostic warning in `reconflow doctor` and scans when only the clashing Python `httpx` CLI is detected.
+  - Applied identity verification across ProjectDiscovery toolchain (`subfinder`, `dnsx`, `httpx`, `katana`, `naabu`, `nuclei`) and `gau`.
+  - Enhanced `--dry-run` to display verified binary paths and detected version numbers.
+
 ## [0.4.0] - 2026-10-31
 
 ### Added

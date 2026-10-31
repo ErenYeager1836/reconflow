@@ -148,8 +148,9 @@ class TestScanRunner(unittest.TestCase):
             self.assertIn("# reconflow report: example.com", content)
             self.assertIn("https://sub.example.com [200]", content)
 
-    @patch("shutil.which")
-    def test_check_tools_missing(self, mock_which):
+    @patch("reconflow.scan.resolve_httpx_binary", return_value=None)
+    @patch("shutil.which", return_value=None)
+    def test_check_tools_missing(self, mock_which, mock_httpx):
         """check_tools should exit with installation links when tools are missing."""
         from reconflow.scan import check_tools
 
@@ -161,8 +162,9 @@ class TestScanRunner(unittest.TestCase):
         self.assertIn("projectdiscovery/subfinder", err_msg)
         self.assertIn("projectdiscovery/httpx", err_msg)
 
+    @patch("reconflow.scan.resolve_httpx_binary", return_value="/usr/bin/tool")
     @patch("shutil.which", return_value="/usr/bin/tool")
-    def test_check_tools_present(self, mock_which):
+    def test_check_tools_present(self, mock_which, mock_httpx):
         """check_tools should pass silently when all tools are installed."""
         from reconflow.scan import check_tools
 

@@ -1,6 +1,7 @@
 """Unit tests for tool plugins, execution safety, and record normalization."""
 
 import json
+import os
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
@@ -227,6 +228,121 @@ class TestPluginImplementations(unittest.TestCase):
         self.assertEqual(records[0]["name"], "Git Config Disclosure")
         self.assertEqual(records[0]["severity"], "medium")
         self.assertEqual(records[0]["matched_at"], "https://api.example.com/.git/config")
+
+
+class TestHttpxCollisionResolution(unittest.TestCase):
+    """Test resolution and identity verification of ProjectDiscovery httpx vs Python httpx."""
+
+    def setUp(self):
+        self.plugin = HttpxPlugin()
+        self.plugin.reset_resolution()
+
+    @patch("subprocess.run")
+    @patch("reconflow.plugins._find_binary_candidates")
+    def test_httpx_pd_correct_resolution(self, mock_candidates, mock_run):
+        """(a) Correct ProjectDiscovery httpx is verified and used."""
+        mock_candidates.return_value = ["/usr/local/bin/httpx"]
+        mock_proc = MagicMock()
+        mock_proc.stdout = "[INF] Current Version: v1.6.8\nprojectdiscovery.io\n"
+        mock_proc.stderr = ""
+        mock_proc.returncode = 0
+        mock_run.return_value = mock_proc
+
+        path = self.plugin.resolve(force=True)
+        self.assertEqual(path, "/usr/local/bin/httpx")
+        self.assertTrue(self.plugin.is_installed())
+        self.assertEqual(self.plugin.get_binary_path(), "/usr/local/bin/httpx")
+        self.assertEqual(self.plugin.get_version(), "v1.6.8")
+        self.assertIsNone(self.plugin.get_clashed_path())
+
+    @patch("subprocess.run")
+    @patch("reconflow.plugins._find_binary_candidates")
+    def test_httpx_python_on_path_first_with_pd_later(self, mock_candidates, mock_run):
+        """(b) Python httpx is on PATH first; reconflow skips it and selects PD httpx later."""
+        mock_candidates.return_value = [
+            "/usr/bin/httpx",
+            "/home/user/go/bin/httpx",
+        ]
+
+        def fake_run(cmd, **kwargs):
+            mock_proc = MagicMock()
+            if cmd[0] == "/usr/bin/httpx":
+                # Simulates the Python CLI failing -version with unrecognized option
+                mock_proc.stdout = "Usage: httpx [OPTIONS] URL\nError: No such option '-e'."
+                mock_proc.stderr = ""
+                mock_proc.returncode = 1
+            elif cmd[0] == "/home/user/go/bin/httpx":
+                mock_proc.stdout = "projectdiscovery.io\n[INF] Current Version: v1.12.0"
+                mock_proc.stderr = ""
+                mock_proc.returncode = 0
+            else:
+                mock_proc.returncode = 127
+            return mock_proc
+
+        mock_run.side_effect = fake_run
+
+        path = self.plugin.resolve(force=True)
+        self.assertEqual(path, "/home/user/go/bin/httpx")
+        self.assertTrue(self.plugin.is_installed())
+        self.assertEqual(self.plugin.get_binary_path(), "/home/user/go/bin/httpx")
+        self.assertEqual(self.plugin.get_version(), "v1.12.0")
+        self.assertEqual(self.plugin.get_clashed_path(), "/usr/bin/httpx")
+
+    @patch("subprocess.run")
+    @patch("reconflow.plugins._find_binary_candidates")
+    def test_httpx_only_wrong_python_cli_found(self, mock_candidates, mock_run):
+        """(c) Only the wrong Python httpx CLI is found; tool is treated as MISSING."""
+        mock_candidates.return_value = ["/usr/bin/httpx"]
+        mock_proc = MagicMock()
+        mock_proc.stdout = "Usage: httpx [OPTIONS] URL\nError: No such option '-e'."
+        mock_proc.stderr = ""
+        mock_proc.returncode = 1
+        mock_run.return_value = mock_proc
+
+        path = self.plugin.resolve(force=True)
+        self.assertIsNone(path)
+        self.assertFalse(self.plugin.is_installed())
+        self.assertIsNone(self.plugin.get_binary_path())
+        self.assertEqual(self.plugin.get_clashed_path(), "/usr/bin/httpx")
+
+        reason = self.plugin.get_missing_reason()
+        expected = (
+            "httpx found at /usr/bin/httpx but it is not ProjectDiscovery httpx "
+            "(name clash with the Python httpx CLI). Install: go install -v "
+            "github.com/projectdiscovery/httpx/cmd/httpx@latest, or set the path in "
+            "reconflow.toml."
+        )
+        self.assertEqual(reason, expected)
+
+    @patch.dict(os.environ, {"RECONFLOW_HTTPX": "/opt/custom/httpx"})
+    @patch("pathlib.Path.is_file", return_value=True)
+    def test_env_override_checked_first(self, mock_isfile):
+        """RECONFLOW_HTTPX environment variable is prioritized as a candidate."""
+        from reconflow.plugins import _find_binary_candidates
+
+        candidates = _find_binary_candidates("httpx", ["httpx"])
+        self.assertIn("/opt/custom/httpx", candidates)
+        self.assertEqual(candidates[0], "/opt/custom/httpx")
+
+    @patch("subprocess.run")
+    @patch("reconflow.plugins._find_binary_candidates")
+    def test_other_pd_tools_identity_verification(self, mock_candidates, mock_run):
+        """Identity check applies to other ProjectDiscovery tools like subfinder."""
+        from reconflow.plugins import SubfinderPlugin
+
+        sub_plugin = SubfinderPlugin()
+        sub_plugin.reset_resolution()
+
+        mock_candidates.return_value = ["/usr/bin/subfinder"]
+        mock_proc = MagicMock()
+        mock_proc.stdout = "[INF] Current Version: v2.17.0\nprojectdiscovery.io\n"
+        mock_proc.stderr = ""
+        mock_proc.returncode = 0
+        mock_run.return_value = mock_proc
+
+        path = sub_plugin.resolve(force=True)
+        self.assertEqual(path, "/usr/bin/subfinder")
+        self.assertTrue(sub_plugin.is_installed())
 
 
 if __name__ == "__main__":

@@ -20,3 +20,8 @@ exclude_tags = ["dos", "fuzz"]
 [notify]
 # Discord or Slack webhook URL
 # webhook_url = "https://discord.com/api/webhooks/..."
+
+[tools]
+# Explicit paths to external binaries (overrides PATH and auto-discovery):
+# httpx = "C:\\Tools\\recon\\httpx.exe"
+# subfinder = "/usr/local/bin/subfinder"

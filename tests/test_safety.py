@@ -299,6 +299,7 @@ class TestDryRunMode(unittest.TestCase):
                 self.assertIn("Command:", stdout_text)
                 self.assertIn("subfinder", stdout_text)
                 self.assertIn("httpx", stdout_text)
+                self.assertIn("(version:", stdout_text)
 
 
 if __name__ == "__main__":

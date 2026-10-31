@@ -40,41 +40,36 @@ run_subprocess = run_cmd
 
 
 def resolve_httpx_binary():
-    """Find and verify ProjectDiscovery httpx binary (checking httpx-toolkit then httpx)."""
-    for candidate in ["httpx-toolkit", "httpx"]:
-        if shutil.which(candidate) is None:
-            continue
-        try:
-            res = run_cmd([candidate, "-version"])
-            out = (res.stdout + " " + res.stderr).lower()
-            if "projectdiscovery" in out:
-                return candidate
-            if candidate == "httpx-toolkit":
-                return candidate
-        except Exception:
-            pass
-
-    if shutil.which("httpx"):
-        try:
-            res = run_cmd(["httpx", "-h"])
-            out = (res.stdout + " " + res.stderr).lower()
-            if "projectdiscovery" in out or "-status-code" in out:
-                return "httpx"
-        except Exception:
-            pass
-        return "httpx"
-    return None
+    """Find and verify ProjectDiscovery httpx binary."""
+    from .plugins import get_plugin
+    p = get_plugin("httpx")
+    if p:
+        return p.get_binary_path()
+    from .plugins import _resolve_httpx_binary
+    return _resolve_httpx_binary()
 
 
 def check_tools(tools, exit_on_missing=True):
     """Check that required external binaries are available in PATH."""
+    from .plugins import get_plugin
+
     missing = []
+    missing_details = {}
     for t in tools:
         if t == "httpx":
-            if not resolve_httpx_binary():
+            bin_path = resolve_httpx_binary()
+            if not bin_path:
                 missing.append("httpx")
+                p = get_plugin("httpx")
+                if p and p.get_clashed_path():
+                    missing_details["httpx"] = p.get_missing_reason()
         elif shutil.which(t) is None:
             missing.append(t)
+        else:
+            p = get_plugin(t)
+            if p and not p.is_installed():
+                missing.append(t)
+                missing_details[t] = p.get_missing_reason()
 
     if missing:
         lines = [
@@ -83,14 +78,12 @@ def check_tools(tools, exit_on_missing=True):
             "Installation links:",
         ]
         for t in missing:
-            url = TOOL_DOWNLOAD_URLS.get(t, "See README for details")
-            lines.append(f"  - {t}: {url}")
+            if t in missing_details:
+                lines.append(f"  - {t}: {missing_details[t]}")
+            else:
+                url = TOOL_DOWNLOAD_URLS.get(t, "See README for details")
+                lines.append(f"  - {t}: {url}")
         lines.append("")
-        lines.append(
-            "Note: 'httpx' must be ProjectDiscovery's binary "
-            "(https://github.com/projectdiscovery/httpx),"
-        )
-        lines.append("      not the Python 'httpx' library from PyPI.")
         msg = "\n".join(lines)
         if exit_on_missing:
             sys.exit(msg)
