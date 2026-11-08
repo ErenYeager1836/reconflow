@@ -200,14 +200,40 @@ reconflow diff example.com --json
 reconflow diff example.com --notify
 ```
 
-`diff` reports:
-- Newly discovered subdomains
-- Newly live HTTP hosts with lead hints
-- Newly opened ports
-- Newly discovered endpoints and URLs
-- Newly surfaced vulnerability findings
+*Sample Diff Output:*
+```text
+[*] Recon diff: 2026-11-08_111610 -> 2026-11-08_111627
+============================================================
 
-Exit code is `1` if changes were detected and `0` if no changes occurred, making it ideal for cron automation.
+[+] NEW SUBDOMAINS (2):
+    + api.example.com
+    + staging.example.com
+
+[+] NEWLY LIVE HOSTS (2):
+    + https://api.example.com [200] [API Gateway] [Express, Node.js]
+        * Worth checking: API endpoint; test for IDOR, mass assignment, and unauthenticated routes.
+    + https://staging.example.com [200] [Staging Portal] [React]
+        * Worth checking: Staging system often mirrors production with weaker auth or unpatched features.
+
+[*] CHANGED HOSTS (1):
+    ~ https://admin.example.com
+        status: 403 -> 200
+        title: 'Access Denied' -> 'Admin Console'
+        * Worth checking: Status changed from 403 to 200; previously protected resource is now publicly accessible.
+        * Worth checking: Page title changed to 'Admin Console'; inspect newly exposed auth interface.
+        * Worth checking: Administrative interface; test for panel access, auth bypass, or default credentials.
+
+[+] NEW OPEN PORTS (1 hosts):
+    + https://staging.example.com: 8443
+
+[+] NEW ENDPOINTS / URLS (2):
+    + https://api.example.com/v1/health
+    + https://staging.example.com/login
+
+============================================================
+```
+
+Exit code is `1` if changes were detected and `0` if no changes occurred, making it suitable for cron monitoring scripts.
 
 ---
 
@@ -219,11 +245,12 @@ Verify whether targets are in or out of scope based on a program scope file:
 reconflow scope scope.txt api.example.com admin.example.com 192.168.1.10
 ```
 
-#### Scope Rules
-- Exact hosts (`example.com`), wildcards (`*.example.com`), and CIDR blocks (`10.0.0.0/8`).
+#### Scope Rules & Upfront Guard
+- Exact hosts (`example.com`), wildcards (`*.example.com`), and CIDR blocks (`10.0.0.0/8`, `2001:db8::/32`).
 - Out-of-scope lines prefixed with `!`, `-`, or `out:` (e.g. `!admin.example.com`).
 - **Out-of-scope rules always take precedence** over in-scope rules.
-- Out-of-scope targets are dropped before invoking external binaries.
+- **Upfront Target Guard**: `reconflow scan <domain> --scope scope.txt` validates the target domain upfront. If the target domain or its parent wildcard is not permitted in the scope file, `reconflow` refuses to scan and aborts immediately before invoking external binaries or initiating network requests.
+- Downstream probe targets, redirected URLs, and discovered endpoints are filtered against the scope rules at every stage.
 
 ---
 
@@ -323,9 +350,19 @@ Progress and diagnostics go to stderr, while stdout outputs discovered live HTTP
 
 ---
 
+## Limitations
+
+- **External Toolchain Dependencies**: reconflow is a pipeline orchestrator rather than a standalone network scanner. It delegates scanning to external Go binaries (`subfinder`, `httpx`, `dnsx`, `naabu`, `nuclei`, etc.). Missing tools result in skipped stages rather than native fallbacks.
+- **Single-Node Execution**: Scanning and diffing run locally on a single machine; there is no distributed worker queue or multi-agent cluster scheduling.
+- **SQLite Concurrency**: Scan states and snapshots are tracked in a local SQLite file (`output/<domain>/reconflow.db`). Running concurrent scans against the same target domain simultaneously may cause database lock contention.
+- **Passive Enumeration Scope**: Subdomain discovery relies primarily on passive certificate and OSINT sources via `subfinder`; it does not perform active dictionary brute-forcing or DNS permutation scans by default.
+- **WAF and Rate Throttling**: While `--rate` and `--threads` provide request pacing, scanning large targets without custom headers or low request rates can trigger upstream CDN rate limits (e.g. Cloudflare, Akamai).
+
+---
+
 ## Contributing
 
-Contributions are welcome! Run tests and linting with:
+The repository contains **176 automated tests** covering scope boundaries, differential comparison, and pipeline execution. Run tests and linting with:
 
 ```bash
 python -m unittest discover tests -v
