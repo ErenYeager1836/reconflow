@@ -327,10 +327,12 @@ class Pipeline:
 
         if stage == "subdomains":
             # Check domain against scope first
-            if not filter_in_scope_targets(
-                [self.context.domain], self.context.scope_data, log_fn=self.context.log
-            ):
-                self.context.log(f"[!] Target domain {self.context.domain} is out of scope.")
+            from .scope import can_scan_domain
+            allowed, reason = can_scan_domain(self.context.domain, self.context.scope_data)
+            if not allowed:
+                self.context.log(
+                    f"[!] Target domain {self.context.domain} is out of scope ({reason})."
+                )
                 return
 
             cmd = plugin.build_command(

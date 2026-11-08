@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 from reconflow.cli import main
 from reconflow.scope import (
     ScopeError,
+    can_scan_domain,
     is_in_scope,
     load_scope,
     normalize_host,
@@ -419,6 +420,153 @@ class TestScopeCLIAndScanIntegration(unittest.TestCase):
         self.assertTrue(is_in_scope("api.example.com", scope))
         self.assertTrue(is_in_scope("example.com", scope))
         self.assertFalse(is_in_scope("notexample.com", scope))
+
+
+class TestScopeHardGateAndLookalikes(unittest.TestCase):
+    """Exhaustive tests for wildcards, apex domains, CIDRs, and lookalike rejections."""
+
+    def test_lookalike_domains_rejected(self):
+        """Scope *.example.com and example.com must strictly reject all lookalike domains."""
+        with tempfile.NamedTemporaryFile("w+", delete=False, encoding="utf-8") as f:
+            f.write("*.example.com\nexample.com\n")
+            f.flush()
+            scope = load_scope(f.name)
+
+        lookalikes = [
+            "notexample.com",
+            "anotherexample.com",
+            "myexample.com",
+            "fakeexample.com",
+            "evil-example.com",
+            "example.company",
+            "example.com.evil.com",
+            "example.com.attacker.org",
+            "sub.notexample.com",
+            "evil.org",
+        ]
+        for domain in lookalikes:
+            with self.subTest(domain=domain):
+                self.assertFalse(
+                    is_in_scope(domain, scope),
+                    f"Lookalike domain '{domain}' must not be in scope!",
+                )
+
+        # Valid subdomains must still match
+        self.assertTrue(is_in_scope("sub.example.com", scope))
+        self.assertTrue(is_in_scope("deep.internal.example.com", scope))
+        self.assertTrue(is_in_scope("example.com", scope))
+
+    def test_apex_and_wildcard_boundary_cases(self):
+        """Validate boundary conditions between apex domains and wildcard subdomains."""
+        # Wildcard only: subdomains match, apex does not
+        with tempfile.NamedTemporaryFile("w+", delete=False, encoding="utf-8") as f:
+            f.write("*.target.com\n")
+            f.flush()
+            scope_wildcard_only = load_scope(f.name)
+
+        self.assertTrue(is_in_scope("api.target.com", scope_wildcard_only))
+        self.assertTrue(is_in_scope("v1.api.target.com", scope_wildcard_only))
+        self.assertFalse(is_in_scope("target.com", scope_wildcard_only))
+
+        # Apex only: apex matches, subdomains do not
+        with tempfile.NamedTemporaryFile("w+", delete=False, encoding="utf-8") as f:
+            f.write("target.com\n")
+            f.flush()
+            scope_apex_only = load_scope(f.name)
+
+        self.assertTrue(is_in_scope("target.com", scope_apex_only))
+        self.assertFalse(is_in_scope("api.target.com", scope_apex_only))
+
+    def test_extended_cidr_and_ipv6_matching(self):
+        """Validate IPv4 /24, /16 CIDR matching and IPv6 prefix matching."""
+        with tempfile.NamedTemporaryFile("w+", delete=False, encoding="utf-8") as f:
+            f.write(
+                "192.168.1.0/24\n"
+                "10.50.0.0/16\n"
+                "!10.50.1.1\n"
+                "2001:db8::/32\n"
+            )
+            f.flush()
+            scope = load_scope(f.name)
+
+        # 192.168.1.0/24 checks
+        self.assertTrue(is_in_scope("192.168.1.1", scope))
+        self.assertTrue(is_in_scope("192.168.1.254", scope))
+        self.assertFalse(is_in_scope("192.168.2.1", scope))
+        self.assertFalse(is_in_scope("192.168.0.254", scope))
+
+        # 10.50.0.0/16 with exclusion !10.50.1.1
+        self.assertTrue(is_in_scope("10.50.0.1", scope))
+        self.assertTrue(is_in_scope("10.50.254.254", scope))
+        self.assertFalse(is_in_scope("10.50.1.1", scope))  # Explicitly out-of-scope
+        self.assertFalse(is_in_scope("10.51.0.1", scope))
+
+        # IPv6 CIDR
+        self.assertTrue(is_in_scope("2001:db8::1", scope))
+        self.assertTrue(is_in_scope("2001:db8:ffff::1", scope))
+        self.assertFalse(is_in_scope("2001:db9::1", scope))
+
+    def test_can_scan_domain_permissions(self):
+        """can_scan_domain allows permissible scan targets and rejects out-of-scope targets."""
+        with tempfile.NamedTemporaryFile("w+", delete=False, encoding="utf-8") as f:
+            f.write(
+                "*.example.com\n"
+                "single.target.org\n"
+                "!admin.example.com\n"
+                "192.168.100.0/24\n"
+            )
+            f.flush()
+            scope = load_scope(f.name)
+
+        # Scanning apex example.com when *.example.com is in scope -> Allowed
+        allowed, reason = can_scan_domain("example.com", scope)
+        self.assertTrue(allowed)
+
+        # Scanning valid subdomain -> Allowed
+        allowed, reason = can_scan_domain("api.example.com", scope)
+        self.assertTrue(allowed)
+
+        # Scanning exact domain -> Allowed
+        allowed, reason = can_scan_domain("single.target.org", scope)
+        self.assertTrue(allowed)
+
+        # Scanning IP within CIDR -> Allowed
+        allowed, reason = can_scan_domain("192.168.100.55", scope)
+        self.assertTrue(allowed)
+
+        # Scanning lookalike -> Refused
+        allowed, reason = can_scan_domain("notexample.com", scope)
+        self.assertFalse(allowed)
+        self.assertIn("does not match any in-scope rule", reason)
+
+        # Scanning explicitly excluded host -> Refused
+        allowed, reason = can_scan_domain("admin.example.com", scope)
+        self.assertFalse(allowed)
+        self.assertIn("explicitly excluded", reason)
+
+        # Scanning completely unrelated target -> Refused
+        allowed, reason = can_scan_domain("evil.com", scope)
+        self.assertFalse(allowed)
+
+    def test_scan_cli_refuses_out_of_scope_target(self):
+        """reconflow scan must refuse upfront and exit with code 1 on out-of-scope domain."""
+        with tempfile.NamedTemporaryFile("w+", delete=False, encoding="utf-8") as f:
+            f.write("*.example.com\n!admin.example.com\n")
+            f.flush()
+            scope_file = f.name
+
+        with patch("sys.stderr", new_callable=io.StringIO):
+            with self.assertRaises(SystemExit) as cm:
+                main(["scan", "notexample.com", "--scope", scope_file])
+            self.assertIn("OUT OF SCOPE", str(cm.exception))
+            self.assertIn("Refusing to execute reconnaissance", str(cm.exception))
+
+        # Test explicitly excluded host
+        with patch("sys.stderr", new_callable=io.StringIO):
+            with self.assertRaises(SystemExit) as cm:
+                main(["scan", "admin.example.com", "--scope", scope_file])
+            self.assertIn("OUT OF SCOPE", str(cm.exception))
+            self.assertIn("Refusing to execute reconnaissance", str(cm.exception))
 
 
 if __name__ == "__main__":

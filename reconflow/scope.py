@@ -247,6 +247,56 @@ def is_in_scope(target: str, scope: dict, resolved_ip: str = None) -> bool:
     return False
 
 
+def can_scan_domain(domain: str, scope: dict) -> tuple:
+    """Check whether a target domain is permitted to be scanned under the scope.
+
+    A domain is permitted if:
+    1. It is directly in scope (exact match, IP in CIDR, or subdomain of an in-scope wildcard).
+    2. OR an in-scope rule targets this domain or its subdomains
+       (e.g., scope has '*.example.com' and domain is 'example.com').
+    3. AND it is not explicitly marked out of scope.
+
+    Returns:
+        (True, "") if allowed.
+        (False, reason_string) if refused.
+    """
+    norm = normalize_host(domain)
+    if not norm:
+        return False, "Target domain cannot be empty"
+
+    # 1. Check if the target is explicitly out of scope
+    for rule in scope.get("out_of_scope", []):
+        if rule.matches(norm):
+            return (
+                False,
+                f"Target '{norm}' is explicitly excluded by out-of-scope rule '{rule.raw}'",
+            )
+        if rule.is_wildcard and (
+            rule.wildcard_apex == norm or norm.endswith(f".{rule.wildcard_apex}")
+        ):
+            return (
+                False,
+                f"Target '{norm}' is excluded by out-of-scope wildcard rule '{rule.raw}'",
+            )
+
+    # 2. Check if target is directly in scope
+    if is_in_scope(norm, scope):
+        return True, ""
+
+    # 3. Check if target is the apex of an in-scope wildcard or parent of in-scope entries
+    for rule in scope.get("in_scope", []):
+        if rule.is_wildcard:
+            if rule.wildcard_apex == norm:
+                return True, ""
+            if norm.endswith(f".{rule.wildcard_apex}"):
+                return True, ""
+        elif rule.is_exact_domain:
+            if rule.exact_domain == norm or rule.exact_domain.endswith(f".{norm}"):
+                return True, ""
+
+    return False, f"Target '{norm}' does not match any in-scope rule in the scope file"
+
+
 def run(args):
     """Execute scope check command for given targets."""
     scope_file = getattr(args, "scope_file", None)

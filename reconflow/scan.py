@@ -553,6 +553,13 @@ def _run_scan(args):
             scope_data = scope.load_scope(scope_file)
         except scope.ScopeError as e:
             sys.exit(f"Error: {e}")
+
+        allowed, reason = scope.can_scan_domain(domain, scope_data)
+        if not allowed:
+            sys.exit(
+                f"[!] Error: Target domain '{domain}' is OUT OF SCOPE ({reason}).\n"
+                f"[!] Refusing to execute reconnaissance."
+            )
     else:
         from . import scope
 
