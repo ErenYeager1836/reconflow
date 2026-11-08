@@ -4,4 +4,6 @@ __pycache__
 *.pyd
 .git
 .github
+.venv
+*.egg-info
 output
