@@ -1,17 +1,46 @@
 # reconflow
 
-[![PyPI](https://img.shields.io/pypi/v/reconflow)](https://pypi.org/project/reconflow/)
+**Recon that tells you what changed.**
 
-Reconnaissance orchestrator for bug bounty hunters that tracks **what changed** between scans. Orchestrates industry-standard external tools into a safe, automated pipeline, enforces strict program scope at every stage, records target state in SQLite, and highlights **new subdomains**, **new live hosts**, **new open ports**, **new endpoints**, and **new findings** with actionable lead hints.
+Run it on a schedule against a bug bounty target and get told about new subdomains, newly live hosts, newly opened ports, and new endpoints since the last scan. It runs standard tools (subfinder, httpx, naabu, nuclei and others), keeps every run in SQLite, and refuses to touch anything outside your scope file.
+
+[![CI](https://github.com/ErenYeager1836/reconflow/actions/workflows/ci.yml/badge.svg)](https://github.com/ErenYeager1836/reconflow/actions)
+[![PyPI](https://img.shields.io/pypi/v/reconflow)](https://pypi.org/project/reconflow/)
+[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
+
+![demo](docs/demo.gif)  <!-- recorded from a domain I own, see docs/DEMO.md -->
+
+## Who this is for
+
+Solo bug bounty hunters who already use subfinder and httpx and want to know when something new shows up, without maintaining a pile of shell scripts and `anew` files.
+
+## What it does
+
+- Runs your toolchain in stages: subdomains, dns, http, urls, ports, vulns.
+- Drops anything outside your scope file before any tool runs, and refuses to scan an out-of-scope target at all.
+- Stores each run so `reconflow diff` shows only what's new, and exits with code 1 when something changed, so it works in cron.
+- Sends a short digest to Discord or Slack with `--notify`.
+- Exports Markdown, CSV, JSON, and SARIF.
+
+## What it doesn't do
+
+- It doesn't replace subfinder, httpx, or nuclei. It calls them, so they must be installed (`reconflow doctor` checks).
+- "Lead hints" are keyword heuristics ("staging", "admin"), not findings. Verify everything yourself.
+- It runs on one machine. There's no distributed mode.
+- Nuclei runs low-risk templates only unless you pass `--intrusive`.
+
+## Quick start
 
 ```bash
-pip install reconflow
+pip install reconflow      # or: docker run ... (see Docker section)
 reconflow doctor
 reconflow scan example.com --scope scope.txt
 reconflow diff example.com
 ```
 
-> **Use responsibly.** Only scan domains you own or that are explicitly in scope for a bug bounty / pentest program you are authorized to test.
+## Example output
+
+<!-- PASTE REAL OUTPUT from docs/DEMO.md here. State which domain it came from. -->
 
 ---
 
@@ -114,6 +143,29 @@ From source:
 git clone https://github.com/ErenYeager1836/reconflow.git
 cd reconflow
 pip install -e .
+```
+
+### Docker
+
+A multi-stage container is provided with all supported external tools (`subfinder`, `httpx`, `dnsx`, `naabu`, `katana`, `nuclei`, `gau`, `waybackurls`) pre-installed under an unprivileged user:
+
+```bash
+# Build the container:
+docker build -t reconflow .
+
+# Verify toolchain availability:
+docker run --rm reconflow doctor
+
+# Run scan with mounted scope file and persistent output directory:
+docker run --rm \
+  -v $(pwd)/output:/app/output \
+  -v $(pwd)/scope.txt:/app/scope.txt:ro \
+  reconflow scan example.com --scope /app/scope.txt
+
+# Inspect differential changes:
+docker run --rm \
+  -v $(pwd)/output:/app/output \
+  reconflow diff example.com
 ```
 
 ---
