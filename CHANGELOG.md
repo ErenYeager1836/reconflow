@@ -48,8 +48,11 @@ All notable changes to `reconflow` will be documented in this file.
 - **Configuration, Reporting & Webhooks**:
   - Configuration support via `reconflow.toml` (`./reconflow.toml` and `~/.config/reconflow/reconflow.toml`).
   - Multiple report formats via `reconflow report --format md|csv|json|sarif`.
+  - Export scan results to CSV format via `--csv` and `report --format csv` (closes #15).
+  - Pipe-safe execution with `--silent` / `--quiet` / `-q` suppressing headers and diagnostic logs (closes #14).
+  - Native Bash and Zsh shell auto-completion scripts in `scripts/completions/` (closes #16).
   - SARIF v2.1.0 exporter (`report.sarif`) for GitHub Code Scanning and IDE integration.
-  - Concise webhook alert digests in `reconflow/notify.py` emitting summarized changes to Discord and Slack.
+  - Concise webhook alert digests in `reconflow/notify.py` emitting summarized changes to Discord and Slack (closes #13).
 
 ## [0.3.0] - 2026-10-28
 - Subdomain discovery and live host probing pipeline.
