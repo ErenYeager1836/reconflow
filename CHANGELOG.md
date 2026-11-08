@@ -2,6 +2,18 @@
 
 All notable changes to `reconflow` will be documented in this file.
 
+## [0.4.2] - 2026-11-08
+
+### Added
+- **Upfront Target Scope Gate**:
+  - `reconflow scan <domain> --scope scope.txt` validates the target domain upfront and refuses to scan if out of scope, exiting with code 1 without spawning subprocesses or initiating network calls.
+  - Added dedicated scope matching tests for apex vs. wildcard boundaries, CIDR blocks, lookalike domain isolation (e.g., `notexample.com`), and precedence of exclusions.
+  - Test suite expanded to 176 automated tests.
+
+### Changed
+- **Python Support**: Dropped end-of-life Python 3.9; set minimum runtime requirement to `requires-python >= 3.10`.
+- **CI Modernization**: Returned GitHub Actions runners from `ubuntu-22.04` to `ubuntu-latest` testing Python 3.10, 3.11, 3.12, and 3.13.
+
 ## [0.4.1] - 2026-10-31
 
 ### Fixed
