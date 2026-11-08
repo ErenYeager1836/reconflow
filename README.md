@@ -106,6 +106,7 @@ From PyPI:
 ```bash
 pip install reconflow
 ```
+*(Note: The published package on PyPI is currently v0.4.1. Upfront target scope validation and recent fixes are available on `main` and pending release in v0.4.2).*
 
 From source:
 
@@ -200,7 +201,11 @@ reconflow diff example.com --json
 reconflow diff example.com --notify
 ```
 
-*Sample Diff Output:*
+#### Example Output (Synthetic, Generated from Test Fixtures)
+
+> [!NOTE]
+> The following sample diff output is illustrative and was generated from synthetic test snapshots in `tests/test_diff.py` using `example.com` (RFC 2606 reserved documentation domain) rather than a live network scan. Zero external network requests were sent.
+
 ```text
 [*] Recon diff: 2026-11-08_111610 -> 2026-11-08_111627
 ============================================================
@@ -250,6 +255,7 @@ reconflow scope scope.txt api.example.com admin.example.com 192.168.1.10
 - Out-of-scope lines prefixed with `!`, `-`, or `out:` (e.g. `!admin.example.com`).
 - **Out-of-scope rules always take precedence** over in-scope rules.
 - **Upfront Target Guard**: `reconflow scan <domain> --scope scope.txt` validates the target domain upfront. If the target domain or its parent wildcard is not permitted in the scope file, `reconflow` refuses to scan and aborts immediately before invoking external binaries or initiating network requests.
+- **Wildcard vs. Apex Handling**: If a scope file contains only `*.example.com` and the scan target is the apex domain `example.com`, `reconflow` permits launching passive subdomain discovery (`subfinder -d example.com`) to locate in-scope subdomains. However, downstream HTTP probing and port scanning strictly drop `example.com` itself unless the apex is explicitly listed in the scope file.
 - Downstream probe targets, redirected URLs, and discovered endpoints are filtered against the scope rules at every stage.
 
 ---
