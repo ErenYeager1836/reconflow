@@ -61,7 +61,8 @@ class TestJwtAnalyzer(unittest.TestCase):
         self.assertTrue(any("Weak / Default HMAC Secret Key" in t for t in titles))
 
     def test_missing_exp_claim(self):
-        token = _make_jwt({"alg": "HS256"}, {"sub": "user"}, secret="a_very_strong_unbruteable_secret_key_12345")
+        strong_sec = "a_very_strong_unbruteable_secret_key_12345"
+        token = _make_jwt({"alg": "HS256"}, {"sub": "user"}, secret=strong_sec)
         report = analyze_jwt(token)
         titles = [v["title"] for v in report["vulnerabilities"]]
         self.assertTrue(any("Missing Expiration Claim" in t for t in titles))

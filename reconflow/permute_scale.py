@@ -44,7 +44,7 @@ def load_wordlist(path: str | Path) -> List[str]:
 
 
 def _probe(host: str, timeout: int = 6) -> Optional[Dict[str, Any]]:
-    """Probe host over HTTPS and HTTP to verify real web services, ignoring self-signed SSL errors."""
+    """Probe host over HTTPS/HTTP for web services, ignoring self-signed SSL errors."""
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE

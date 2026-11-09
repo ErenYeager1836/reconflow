@@ -84,7 +84,9 @@ def search_github_leaks(
                 })
         except urllib.error.HTTPError as e:
             if e.code in (401, 403):
-                print(f"[!] GitHub API rate limit reached or token lacks permission ({e.code}). Stopping early.")
+                print(
+                    f"[!] GitHub API rate limit or no permission ({e.code}). Stopping early."
+                )
                 break
             if e.code == 422:
                 # Query syntax rejected by GitHub API

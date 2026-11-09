@@ -260,7 +260,10 @@ def fetch_ct_subdomains(
     output_dir.mkdir(parents=True, exist_ok=True)
     out_file = output_dir / "ct_subdomains.txt"
     out_file.write_text("\n".join(result), encoding="utf-8")
-    print(f"[+] Found {len(result)} subdomains in Certificate Transparency logs -> {out_file.name}")
+    print(
+        f"[+] Found {len(result)} subdomains in Certificate Transparency logs "
+        f"-> {out_file.name}"
+    )
     return result
 
 
@@ -394,7 +397,10 @@ def detect_waf(
     out_file = output_dir / "waf_detection.json"
     out_file.write_text(json.dumps(results, indent=2), encoding="utf-8")
     protected_count = sum(1 for r in results if r["protected"])
-    print(f"[+] Fingerprinted {len(results)} hosts: {protected_count} behind CDN/WAF -> {out_file.name}")
+    print(
+        f"[+] Fingerprinted {len(results)} hosts: "
+        f"{protected_count} behind CDN/WAF -> {out_file.name}"
+    )
     return results
 
 
@@ -459,7 +465,10 @@ def harvest_sitemaps(
     txt_file = output_dir / "discovered_routes.txt"
     txt_file.write_text("\n".join(sorted(discovered_routes)), encoding="utf-8")
 
-    print(f"[+] Harvested {len(discovered_routes)} unique route(s) across {len(sitemap_details)} hosts")
+    print(
+        f"[+] Harvested {len(discovered_routes)} unique route(s) across "
+        f"{len(sitemap_details)} hosts"
+    )
     return sitemap_details
 
 
@@ -730,12 +739,16 @@ def audit_ssl_certificates(
 
             issuer_dict = dict(x[0] for x in cert.get("issuer", ()))
             subject_dict = dict(x[0] for x in cert.get("subject", ()))
-            issuer_org = issuer_dict.get("organizationName", issuer_dict.get("commonName", "Unknown"))
+            common_iss = issuer_dict.get("commonName", "Unknown")
+            issuer_org = issuer_dict.get("organizationName", common_iss)
             common_name = subject_dict.get("commonName", host)
 
             sans = [val for typ, val in cert.get("subjectAltName", ()) if typ == "DNS"]
 
-            is_self_signed = (issuer_dict == subject_dict and bool(issuer_dict)) or (not is_valid and not cert)
+            is_self_signed = (
+                (issuer_dict == subject_dict and bool(issuer_dict))
+                or (not is_valid and not cert)
+            )
             is_expiring = bool(days_remaining is not None and days_remaining < 30)
 
             audit_results.append({
@@ -743,7 +756,9 @@ def audit_ssl_certificates(
                 "port": port,
                 "valid": is_valid,
                 "common_name": common_name,
-                "issuer": issuer_org if is_valid else "Untrusted / Self-signed",
+                "issuer": (
+                    issuer_org if is_valid else "Untrusted / Self-signed"
+                ),
                 "days_remaining": days_remaining,
                 "self_signed": is_self_signed,
                 "expiring_soon": is_expiring,
@@ -758,7 +773,10 @@ def audit_ssl_certificates(
     out_file = output_dir / "ssl_audit.json"
     out_file.write_text(json.dumps(audit_results, indent=2), encoding="utf-8")
     flagged = sum(1 for r in audit_results if r.get("self_signed") or r.get("expiring_soon"))
-    print(f"[+] Audited {len(audit_results)} SSL/TLS hosts: {flagged} certificate warning(s) -> {out_file.name}")
+    print(
+        f"[+] Audited {len(audit_results)} SSL/TLS hosts: "
+        f"{flagged} certificate warning(s) -> {out_file.name}"
+    )
     return audit_results
 
 
@@ -820,7 +838,10 @@ def fingerprint_favicons(
     out_file = output_dir / "favicon_fingerprints.json"
     out_file.write_text(json.dumps(findings, indent=2), encoding="utf-8")
     matched_count = sum(1 for f in findings if f["matched"])
-    print(f"[+] Downloaded {len(findings)} favicons: {matched_count} framework match(es) -> {out_file.name}")
+    print(
+        f"[+] Downloaded {len(findings)} favicons: "
+        f"{matched_count} framework match(es) -> {out_file.name}"
+    )
     return findings
 
 
@@ -967,5 +988,8 @@ def grade_security_headers(
     out_file = output_dir / "security_grades.json"
     out_file.write_text(json.dumps(grades, indent=2), encoding="utf-8")
     avg_score = int(sum(g["score"] for g in grades) / len(grades)) if grades else 0
-    print(f"[+] Graded {len(grades)} endpoints: Average defensive score {avg_score}/100 -> {out_file.name}")
+    print(
+        f"[+] Graded {len(grades)} endpoints: "
+        f"Average defensive score {avg_score}/100 -> {out_file.name}"
+    )
     return grades

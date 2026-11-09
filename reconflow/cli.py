@@ -1,9 +1,7 @@
 """reconflow.cli - Command-line interface and subcommand routing."""
 
 import argparse
-import json
 import sys
-from pathlib import Path
 from . import __version__, scan
 
 
@@ -131,7 +129,7 @@ def build_parser():
     p_scan.add_argument(
         "--jwt",
         action="store_true",
-        help="Audit JWT tokens found during recon for vulnerabilities (alg:none, weak HMAC, missing exp)",
+        help="Audit JWT tokens for vulnerabilities (alg:none, weak HMAC, missing exp)",
     )
     p_scan.add_argument(
         "--params",
@@ -151,7 +149,7 @@ def build_parser():
     p_scan.add_argument(
         "--permute",
         action="store_true",
-        help="Generate scaled subdomain permutations with wildcard DNS filtering and HTTP verification",
+        help="Generate scaled subdomain permutations with wildcard DNS and HTTP filtering",
     )
     p_scan.add_argument(
         "--perm-wordlist",
@@ -181,7 +179,7 @@ def build_parser():
     p_scan.add_argument(
         "--audits",
         action="store_true",
-        help="Run defensive audits (cloud assets, ASN mapping, sensitive files, WAF, email SPF/DMARC)",
+        help="Run defensive audits (cloud assets, ASN, sensitive files, WAF, email)",
     )
     p_scan.add_argument(
         "--full-audit",

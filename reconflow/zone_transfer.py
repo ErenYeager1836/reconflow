@@ -17,7 +17,7 @@ import struct
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 
 def _query_doh_ns(domain: str, timeout: int = 5) -> List[str]:
@@ -79,7 +79,12 @@ def _test_nameserver_axfr(domain: str, ns_ip: str, timeout: int = 6) -> Dict[str
             # Read 2-byte response length
             raw_len = s.recv(2)
             if len(raw_len) < 2:
-                return {"vulnerable": False, "status": "Connection closed", "rcode": None, "records_count": 0}
+                return {
+                    "vulnerable": False,
+                    "status": "Connection closed",
+                    "rcode": None,
+                    "records_count": 0,
+                }
 
             resp_len = struct.unpack("!H", raw_len)[0]
             resp_data = b""
@@ -90,7 +95,12 @@ def _test_nameserver_axfr(domain: str, ns_ip: str, timeout: int = 6) -> Dict[str
                 resp_data += chunk
 
         if len(resp_data) < 12:
-            return {"vulnerable": False, "status": "Malformed response", "rcode": None, "records_count": 0}
+            return {
+                "vulnerable": False,
+                "status": "Malformed response",
+                "rcode": None,
+                "records_count": 0,
+            }
 
         # Parse DNS header (12 bytes: ID, Flags, QDCOUNT, ANCOUNT, NSCOUNT, ARCOUNT)
         _, flags, _, ancount, _, _ = struct.unpack("!HHHHHH", resp_data[0:12])
@@ -118,7 +128,12 @@ def _test_nameserver_axfr(domain: str, ns_ip: str, timeout: int = 6) -> Dict[str
                 "records_count": 0,
             }
     except (socket.timeout, TimeoutError):
-        return {"vulnerable": False, "status": "Timeout (Port 53 filtered)", "rcode": None, "records_count": 0}
+        return {
+            "vulnerable": False,
+            "status": "Timeout (Port 53 filtered)",
+            "rcode": None,
+            "records_count": 0,
+        }
     except ConnectionRefusedError:
         return {"vulnerable": False, "status": "Port 53 closed", "rcode": None, "records_count": 0}
     except Exception as e:

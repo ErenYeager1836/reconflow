@@ -29,7 +29,9 @@ SKIP_TECH: Set[str] = {
 }
 
 
-def _query_nvd(keyword: str, timeout: int = 15, api_key: Optional[str] = None) -> List[Dict[str, Any]]:
+def _query_nvd(
+    keyword: str, timeout: int = 15, api_key: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """Query the NVD REST API v2.0 for a specific technology keyword."""
     encoded_kw = urllib.parse.quote(keyword.strip())
     url = f"{NVD_API}?keywordSearch={encoded_kw}&resultsPerPage=5"
@@ -60,7 +62,9 @@ def _query_nvd(keyword: str, timeout: int = 15, api_key: Optional[str] = None) -
                 if metric_list and isinstance(metric_list, list):
                     cvss_data = metric_list[0].get("cvssData", {})
                     score = cvss_data.get("baseScore")
-                    severity = cvss_data.get("baseSeverity", metric_list[0].get("baseSeverity", "UNKNOWN"))
+                    severity = cvss_data.get(
+                        "baseSeverity", metric_list[0].get("baseSeverity", "UNKNOWN")
+                    )
                     break
 
             if cve_id:
@@ -108,7 +112,7 @@ def correlate_cves(
         return []
 
     effective_key = api_key or os.environ.get("NVD_API_KEY")
-    # If API key is present, NVD allows 50 req/30s (~0.6s delay); unauth allows 5 req/30s (~6s delay)
+    # If key present, NVD allows 50 req/30s (~0.6s delay); unauth allows 5 req/30s (~6s delay)
     if delay_between_requests is not None:
         sleep_interval = delay_between_requests
     else:
@@ -132,5 +136,8 @@ def correlate_cves(
     out_file.write_text(json.dumps(findings, indent=2), encoding="utf-8")
 
     total_cves = sum(len(f["cves"]) for f in findings)
-    print(f"[+] Found {total_cves} potential CVE(s) across {len(findings)} technologies -> {out_file.name}")
+    print(
+        f"[+] Found {total_cves} potential CVE(s) across "
+        f"{len(findings)} technologies -> {out_file.name}"
+    )
     return findings

@@ -13,7 +13,7 @@ import socket
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 DOH_PROVIDERS: List[str] = [
     "https://cloudflare-dns.com/dns-query",
