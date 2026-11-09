@@ -17,6 +17,7 @@ Solo bug bounty hunters who already use subfinder and httpx and want to know whe
 ## What it does
 
 - Runs your toolchain in stages: subdomains, dns, http, urls, ports, vulns.
+- Performs built-in zero-dependency security audits: DNSSEC/AXFR validation, JWT token analysis, Web Cache Deception detection, sensitive file audits, cloud bucket discovery, and CVE correlation.
 - Drops anything outside your scope file before any tool runs, and refuses to scan an out-of-scope target at all.
 - Stores each run so `reconflow diff` shows only what's new, and exits with code 1 when something changed, so it works in cron.
 - Sends a short digest to Discord or Slack with `--notify`.
@@ -35,6 +36,7 @@ Solo bug bounty hunters who already use subfinder and httpx and want to know whe
 pip install reconflow      # or: docker run ... (see Docker section)
 reconflow doctor
 reconflow scan example.com --scope scope.txt
+reconflow scan example.com --full-audit  # run all audits, analysis, and discovery
 reconflow diff example.com
 ```
 
@@ -72,6 +74,7 @@ reconflow does not reinvent reconnaissance tools; it orchestrates them safely as
 +-------------------------------------------------------------------------+
        |
        +--> Analysis  : Takeover detection, JS endpoint & masked secret mining
+       +--> Audits    : DNSSEC, AXFR, JWT, Web Cache, Cloud Buckets, CVE correlation
        +--> Diffing   : What is NEW (ports, endpoints, findings, hosts)
        +--> Reporting : Markdown, CSV, JSON, and SARIF v2.1.0
        +--> Webhook   : Concise alert digest for Discord / Slack
@@ -83,6 +86,9 @@ reconflow does not reinvent reconnaissance tools; it orchestrates them safely as
 
 - **Toolchain Diagnostics (`doctor`)**: Inspects installed external binaries, versions, paths, and provides installation hints for missing ones.
 - **Modular Pipeline**: Six canonical stages (`subdomains -> dns -> http -> urls -> ports -> vulns`). Filter stages via `--stages` or `--skip`.
+- **Advanced Defensive Audits (`--audits`, `--full-audit`)**: 15 built-in zero-dependency security audits including cloud storage bucket discovery (AWS S3, GCP, Azure), DNSSEC/CAA verification, AXFR zone transfer tests, exposed sensitive files (`.git`, `.env`), WAF fingerprinting, defensive HTTP security headers grading, and favicon hashing.
+- **Web & API Intelligence (`--jwt`, `--params`, `--cache-audit`)**: Dissects JWT tokens, checks `alg: none` and weak HMAC secrets, categorizes URL parameters for SSRF/IDOR/SQLi, and tests for Web Cache Deception.
+- **Vulnerability & OSINT Engines (`--cve-correlate`, `--github-leaks`)**: Correlates detected software versions with the NVD CVE API v2.0 and queries public GitHub code for leaked credentials or secrets referencing the domain.
 - **Hard Scope Enforcement**: Universal scope gate drops out-of-scope hosts and IPs before executing any tool. Fail-closed scope design.
 - **Polite & Safe Scanning**: Rate limiting (`--rate`, default: 50 req/s, use 0 for unlimited), thread limits (`--threads`), and safe vulnerability scanning defaults. Nuclei runs safe checks by default; aggressive templates require `--intrusive` or `--all-vulns`.
 - **Dry Run & Resume**: Preview execution plans with `--dry-run`. Resume interrupted scans with `--resume` to skip already completed stages.
@@ -135,7 +141,7 @@ From PyPI:
 ```bash
 pip install reconflow
 ```
-*(Note: The published package on PyPI is currently v0.4.1. Upfront target scope validation and recent fixes are available on `main` and pending release in v0.4.2).*
+*(Release v0.5.0 brings built-in standard-library security audits, DNSSEC/AXFR tests, JWT analysis, and CVE correlation).*
 
 From source:
 

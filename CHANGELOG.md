@@ -2,6 +2,40 @@
 
 All notable changes to `reconflow` will be documented in this file.
 
+## [0.5.0] - 2026-11-09
+
+### Added
+- **Wave 1: Web & API Intelligence Modules**:
+  - `reconflow/jwt_analyzer.py`: Decode and audit JSON Web Tokens for `alg: none` signature evasion, missing expiration claims, and dictionary cracking against weak HMAC secrets.
+  - `reconflow/params_analyzer.py`: Categorize URL query parameters for high-impact vulnerability surfaces (SSRF, IDOR, LFI/RFI, SQLi, and administrative privilege escalation).
+  - `reconflow/cache_audit.py`: Web Cache Deception detection, CDN cacheability header analysis (`CF-Cache-Status`, `X-Cache`), and unkeyed header reflection audits.
+- **Wave 2: DNS & Discovery Expansion Modules**:
+  - `reconflow/zone_transfer.py`: RFC 1035 / RFC 5936 raw TCP socket AXFR query builder and response parser, with DoH authoritative nameserver discovery.
+  - `reconflow/permute_scale.py`: Scaled subdomain permutation engine with SecLists wordlist support and `(status, content_length)` fingerprint clustering to eliminate wildcard DNS false positives.
+  - `reconflow/dns_sec.py`: RFC 8484 DoH query engine for DNSSEC validation (DS/DNSKEY records), RFC 6844 CAA policy extraction, and dangling cloud nameserver detection (AWS Route53, Azure DNS, NS1).
+- **Wave 3: Vulnerability & External OSINT Modules**:
+  - `reconflow/cve_correlate.py`: Correlate detected web server and framework technologies against NVD CVE API v2.0 with rate limit throttling.
+  - `reconflow/github_leaks.py`: Authenticated public GitHub code search for leaked credentials, API keys, and `.env` files referencing the target domain.
+  - `reconflow/audits.py`: 15 built-in zero-dependency defensive audits:
+    - Cloud asset bucket discovery across AWS S3, GCP Storage, Azure Blob, and DigitalOcean Spaces.
+    - ASN & IP range mapping via RDAP.
+    - CORS misconfiguration auditing (`null` origin, unvalidated reflections).
+    - Dangling CNAME takeover verification.
+    - crt.sh Certificate Transparency sub-issuer and SAN harvesting.
+    - Exposed sensitive files and dev artifacts (`/.git/HEAD`, `/.env`, `/.DS_Store`).
+    - Web Application Firewall (WAF) and reverse-proxy fingerprinting.
+    - Crawl route harvesting (`/robots.txt`, `/sitemap.xml`).
+    - Email security & anti-spoofing audit (SPF and DMARC enforcement).
+    - SSL/TLS certificate security, cipher suite checks, and expiry warnings.
+    - Favicon MD5/MurmurHash framework identification.
+    - RFC 9116 `security.txt` discovery and disclosure policy verification.
+    - Defensive HTTP security headers grading (A+ to F).
+- **Scan CLI Integration & Findings Persistence**:
+  - New scan flags: `--jwt`, `--params`, `--cache-audit`, `--axfr`, `--permute`, `--perm-wordlist`, `--dns-sec`, `--cve-correlate`, `--github-leaks`, `--github-token`, `--audits`, and convenience flag `--full-audit`.
+  - Audits automatically record structured vulnerability findings into SQLite `reconflow.db` (`findings` table), `vulns.json`, and scan reports, participating in `reconflow diff` comparisons.
+  - Shell completion scripts updated for Bash and Zsh (`tests/test_completions.py`).
+  - Test suite expanded to 212 tests across unit, integration, and security audit suites.
+
 ## [0.4.2] - 2026-11-08
 
 ### Added
