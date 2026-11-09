@@ -57,7 +57,10 @@ FROM golang:1.23-bookworm AS waybackurls-builder
 ARG TARGETARCH
 ENV WAYBACKURLS_VERSION=0.1.0
 RUN GOARCH=${TARGETARCH} GOOS=linux CGO_ENABLED=0 \
-    go install "github.com/tomnomnom/waybackurls@v${WAYBACKURLS_VERSION}"
+    go install "github.com/tomnomnom/waybackurls@v${WAYBACKURLS_VERSION}" && \
+    if [ -f "/go/bin/linux_${TARGETARCH}/waybackurls" ]; then \
+        mv "/go/bin/linux_${TARGETARCH}/waybackurls" /go/bin/waybackurls; \
+    fi
 
 # ==============================================================================
 # Stage 2: Runtime Container
