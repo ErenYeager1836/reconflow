@@ -1,7 +1,9 @@
 """reconflow.cli - Command-line interface and subcommand routing."""
 
 import argparse
+import json
 import sys
+from pathlib import Path
 from . import __version__, scan
 
 
@@ -124,6 +126,67 @@ def build_parser():
         "-c", "--config",
         default=None,
         help="Path to custom reconflow.toml config file",
+    )
+    # Analysis & Vulnerability Flags (Waves 1-3)
+    p_scan.add_argument(
+        "--jwt",
+        action="store_true",
+        help="Audit JWT tokens found during recon for vulnerabilities (alg:none, weak HMAC, missing exp)",
+    )
+    p_scan.add_argument(
+        "--params",
+        action="store_true",
+        help="Analyze URL query parameters for sensitive patterns (SSRF, IDOR, LFI, SQLi, Admin)",
+    )
+    p_scan.add_argument(
+        "--cache-audit",
+        action="store_true",
+        help="Audit web cache headers and test for Web Cache Deception & unkeyed header reflection",
+    )
+    p_scan.add_argument(
+        "--axfr",
+        action="store_true",
+        help="Audit authoritative nameservers for unrestricted DNS zone transfers (AXFR)",
+    )
+    p_scan.add_argument(
+        "--permute",
+        action="store_true",
+        help="Generate scaled subdomain permutations with wildcard DNS filtering and HTTP verification",
+    )
+    p_scan.add_argument(
+        "--perm-wordlist",
+        default=None,
+        help="Path to custom wordlist for subdomain permutation",
+    )
+    p_scan.add_argument(
+        "--dns-sec",
+        action="store_true",
+        help="Audit DNSSEC, RFC 6844 CAA records, and check for dangling nameservers (NS takeover)",
+    )
+    p_scan.add_argument(
+        "--cve-correlate",
+        action="store_true",
+        help="Correlate detected technologies on live hosts against NVD CVE API v2.0",
+    )
+    p_scan.add_argument(
+        "--github-leaks",
+        action="store_true",
+        help="Search public GitHub code for leaked secrets referencing target domain",
+    )
+    p_scan.add_argument(
+        "--github-token",
+        default=None,
+        help="GitHub personal access token for public code search",
+    )
+    p_scan.add_argument(
+        "--audits",
+        action="store_true",
+        help="Run defensive audits (cloud assets, ASN mapping, sensitive files, WAF, email SPF/DMARC)",
+    )
+    p_scan.add_argument(
+        "--full-audit",
+        action="store_true",
+        help="Enable all analysis and audit modules across the scan",
     )
 
     # diff subcommand

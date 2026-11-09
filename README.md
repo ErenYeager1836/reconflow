@@ -228,6 +228,27 @@ reconflow scan example.com --stages vulns --intrusive
 | `--keep-wildcard` | Warn about wildcard DNS but don't filter wildcard results |
 | `--json` | Write structured results to `report.json` |
 | `--csv` | Write live host data to `report.csv` |
+| `--axfr` | Audit authoritative nameservers for unrestricted DNS Zone Transfers (AXFR) |
+| `--dns-sec` | Audit DNSSEC, RFC 6844 CAA records, and check for dangling cloud nameservers |
+| `--permute` | Generate scaled subdomain permutations with wildcard DNS filtering and HTTP verification |
+| `--perm-wordlist` | Path to custom SecLists-style wordlist for subdomain permutations |
+| `--params` | Categorize discovered URL query parameters for SSRF, IDOR, LFI, and SQLi |
+| `--jwt` | Audit discovered JWT tokens for `alg: none` bypass, weak HMAC secrets, and missing `exp` |
+| `--cache-audit` | Audit CDN cache headers and test for Web Cache Deception & unkeyed reflection |
+| `--cve-correlate` | Correlate detected web technologies against the NVD CVE API v2.0 |
+| `--github-leaks` | Search public GitHub code for leaked credentials and configurations |
+| `--github-token` | GitHub Personal Access Token for code search (or via `GITHUB_TOKEN` env var) |
+| `--audits` | Run comprehensive defensive audits (cloud assets, ASN, CORS, sensitive files, WAF, SSL, etc.) |
+| `--full-audit` | Convenience flag: enable all analysis and audit modules across the scan |
+
+#### Advanced Analysis & Security Audits
+
+reconflow includes built-in standard-library security audits that run without external binaries:
+
+- **DNS Infrastructure & AXFR (`--axfr`, `--dns-sec`)**: Tests nameservers for open zone transfers over TCP port 53, validates DNSSEC chain of trust (DS/DNSKEY records), inspects CAA issuance policies, and identifies dangling cloud nameservers (AWS Route53, Azure DNS, NS1) susceptible to zone hijacking.
+- **Web & API Intelligence (`--jwt`, `--params`, `--cache-audit`)**: Dissects JWT tokens, attempts dictionary cracking of weak HMAC secrets, tests `alg: none` signature evasion, maps query parameters to vulnerability categories, and audits CDN caching rules for Web Cache Deception.
+- **Vulnerability Correlation & OSINT (`--cve-correlate`, `--github-leaks`, `--audits`)**: Queries the NVD CVE API v2.0 for detected framework versions, searches public GitHub repositories for leaked credentials or `.env` files referencing the domain, extracts public cloud storage buckets (AWS S3, GCP Storage, Azure Blob), checks for exposed `.git` or sensitive dev files, and grades defensive HTTP response headers (A+ to F).
+- **Automated Findings Persistence**: High-confidence vulnerabilities discovered during audits automatically populate `vulns.json`, SQLite `reconflow.db`, and scan reports, surfacing in `reconflow diff` comparisons across scan runs.
 
 #### Vulnerability Scanning & Nuclei Safe Mode
 

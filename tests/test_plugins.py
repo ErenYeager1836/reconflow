@@ -237,6 +237,13 @@ class TestHttpxCollisionResolution(unittest.TestCase):
     def setUp(self):
         self.plugin = HttpxPlugin()
         self.plugin.reset_resolution()
+        self.env_patcher = patch.dict(os.environ, {}, clear=False)
+        self.env_patcher.start()
+        if "RECONFLOW_HTTPX" in os.environ:
+            del os.environ["RECONFLOW_HTTPX"]
+
+    def tearDown(self):
+        self.env_patcher.stop()
 
     @patch("subprocess.run")
     @patch("reconflow.plugins._find_binary_candidates")

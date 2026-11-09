@@ -21,7 +21,7 @@ _reconflow() {
   previous="${words[CURRENT-1]}"
   case "$command" in
     scan)
-      flags=(-o --output --threads --timeout --keep-wildcard --json --csv -q --quiet --silent --screenshots --scope --stages --skip --rate --dry-run --resume --intrusive --all-vulns -c --config -h --help)
+      flags=(-o --output --threads --timeout --keep-wildcard --json --csv -q --quiet --silent --screenshots --scope --stages --skip --rate --dry-run --resume --intrusive --all-vulns -c --config --jwt --params --cache-audit --axfr --permute --perm-wordlist --dns-sec --cve-correlate --github-leaks --github-token --audits --full-audit -h --help)
       ;;
     diff)
       flags=(-o --output --json --notify --webhook-url -h --help)

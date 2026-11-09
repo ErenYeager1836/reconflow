@@ -964,6 +964,271 @@ def _run_scan(args):
             if "vulns" not in completed_stages:
                 completed_stages.append("vulns")
 
+        # ==========================================
+        # Integrated Analysis & Audit Engines (Waves 1-3)
+        # ==========================================
+        full_audit = getattr(args, "full_audit", False)
+
+        # 1. AXFR DNS Zone Transfer
+        if getattr(args, "axfr", False) or full_audit:
+            try:
+                from .zone_transfer import audit_zone_transfer
+
+                axfr_results = audit_zone_transfer(domain, out_dir, timeout=timeout or 5)
+                for r in axfr_results:
+                    if r.get("vulnerable"):
+                        vuln_records.append({
+                            "template_id": "dns-zone-transfer-axfr",
+                            "name": f"Open AXFR Zone Transfer on {r.get('nameserver')}",
+                            "severity": "critical",
+                            "host": r.get("nameserver") or domain,
+                            "matched_at": str(r.get("ip") or r.get("nameserver")),
+                            "description": f"Authoritative nameserver {r.get('nameserver')} allows unrestricted AXFR zone transfers.",
+                        })
+            except Exception as e:
+                print(f"[!] AXFR audit error: {e}")
+
+        # 2. DNSSEC, CAA & Dangling Nameservers
+        if getattr(args, "dns_sec", False) or full_audit:
+            try:
+                from .dns_sec import audit_dns_security
+
+                dns_res = audit_dns_security(domain, out_dir, timeout=timeout or 5)
+                for dns_item in dns_res.get("nameservers", {}).get("dangling_nameservers", []):
+                    vuln_records.append({
+                        "template_id": "dangling-nameserver-takeover",
+                        "name": f"Dangling Nameserver ({dns_item.get('cloud_provider', 'Cloud')} NS Takeover)",
+                        "severity": "critical",
+                        "host": domain,
+                        "matched_at": dns_item.get("nameserver", ""),
+                        "description": f"Nameserver {dns_item.get('nameserver')} is unresolvable or unregistered, allowing potential zone hijacking.",
+                    })
+            except Exception as e:
+                print(f"[!] DNSSEC audit error: {e}")
+
+        # 3. Subdomain Permutation Engine
+        if getattr(args, "permute", False) or full_audit:
+            try:
+                from .permute_scale import generate_permutations_scaled
+
+                perm_results = generate_permutations_scaled(
+                    subs,
+                    domain,
+                    out_dir,
+                    wordlist_path=getattr(args, "perm_wordlist", None),
+                    timeout=timeout or 6,
+                )
+                new_hosts = [
+                    r["host"] for r in perm_results if r.get("host") and r["host"] not in subs
+                ]
+                if new_hosts:
+                    subs = sorted(set(subs) | set(new_hosts))
+                    (out_dir / "subdomains.txt").write_text(
+                        "\n".join(subs) + "\n", encoding="utf-8"
+                    )
+            except Exception as e:
+                print(f"[!] Subdomain permutation error: {e}")
+
+        # 4. Parameters Analyzer
+        if getattr(args, "params", False) or full_audit:
+            try:
+                from .params_analyzer import analyze_urls
+
+                url_targets = [
+                    u["url"]
+                    for u in all_urls
+                    if isinstance(u, dict) and u.get("url")
+                ] or live
+                if url_targets:
+                    analyze_urls(url_targets, out_dir)
+            except Exception as e:
+                print(f"[!] Parameters analysis error: {e}")
+
+        # 5. Cache Deception & CDN Audit
+        if getattr(args, "cache_audit", False) or full_audit:
+            try:
+                from .cache_audit import audit_cache_deception
+
+                if live:
+                    cache_findings = audit_cache_deception(
+                        live[:15], out_dir, timeout=timeout or 6
+                    )
+                    for cf in cache_findings:
+                        if cf.get("vulnerable"):
+                            vuln_records.append({
+                                "template_id": "web-cache-deception",
+                                "name": f"Web Cache Deception on {cf.get('base_url')}",
+                                "severity": "high",
+                                "host": cf.get("base_url") or domain,
+                                "matched_at": cf.get("test_url") or "",
+                                "description": "Cache server caches authenticated response under static extension path.",
+                            })
+            except Exception as e:
+                print(f"[!] Cache audit error: {e}")
+
+        # 6. JWT Security Analyzer
+        if getattr(args, "jwt", False) or full_audit:
+            try:
+                from .jwt_analyzer import (
+                    analyze_jwt,
+                    bypass_none_algorithm,
+                    crack_weak_hmac,
+                )
+                import re as _re
+
+                jwt_regex = _re.compile(
+                    r"eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]*"
+                )
+                candidate_urls = [
+                    u["url"]
+                    for u in all_urls
+                    if isinstance(u, dict) and u.get("url")
+                ] or live
+                found_tokens = set()
+                for u in candidate_urls:
+                    for match in jwt_regex.findall(u):
+                        found_tokens.add(match)
+
+                jwt_results = []
+                for token in list(found_tokens)[:10]:
+                    analysis = analyze_jwt(token)
+                    crack = crack_weak_hmac(token)
+                    none_byp = bypass_none_algorithm(token)
+                    is_vuln = bool(
+                        crack.get("cracked")
+                        or none_byp.get("bypassed")
+                        or not analysis.get("claims", {}).get("has_expiration")
+                    )
+                    if is_vuln:
+                        vuln_records.append({
+                            "template_id": "jwt-security-misconfiguration",
+                            "name": "Vulnerable or Weak JWT Token",
+                            "severity": "high" if crack.get("cracked") else "medium",
+                            "host": domain,
+                            "matched_at": token[:30] + "...",
+                            "description": f"JWT issue: cracked={crack.get('cracked')}, alg:none={none_byp.get('bypassed')}",
+                        })
+                    jwt_results.append({
+                        "token": token[:20] + "...",
+                        "analysis": analysis,
+                        "crack": crack,
+                        "none_bypass": none_byp,
+                    })
+                if jwt_results:
+                    (out_dir / "jwt_analysis.json").write_text(
+                        json.dumps(jwt_results, indent=2), encoding="utf-8"
+                    )
+            except Exception as e:
+                print(f"[!] JWT analysis error: {e}")
+
+        # 7. CVE Correlation via NVD API v2.0
+        if getattr(args, "cve_correlate", False) or full_audit:
+            try:
+                from .cve_correlate import correlate_cves
+
+                if hosts_data:
+                    cve_findings = correlate_cves(
+                        hosts_data, out_dir, timeout=timeout or 15
+                    )
+                    for f in cve_findings:
+                        for cve_item in f.get("cves", []):
+                            score = cve_item.get("cvss_score") or 0.0
+                            sev = (
+                                "critical"
+                                if score >= 9.0
+                                else "high"
+                                if score >= 7.0
+                                else "medium"
+                                if score >= 4.0
+                                else "info"
+                            )
+                            vuln_records.append({
+                                "template_id": f"cve-{str(cve_item.get('cve_id', 'unknown')).lower()}",
+                                "name": f"Known CVE: {cve_item.get('cve_id')} ({f.get('technology')})",
+                                "severity": sev,
+                                "host": domain,
+                                "matched_at": f.get("technology", ""),
+                                "description": cve_item.get("summary", ""),
+                            })
+            except Exception as e:
+                print(f"[!] CVE correlation error: {e}")
+
+        # 8. GitHub Leaks
+        if getattr(args, "github_leaks", False):
+            try:
+                from .github_leaks import search_github_leaks
+
+                gh_results = search_github_leaks(
+                    domain,
+                    out_dir,
+                    token=getattr(args, "github_token", None),
+                    timeout=timeout or 10,
+                )
+                for g in gh_results:
+                    vuln_records.append({
+                        "template_id": "github-leaked-secret",
+                        "name": f"Potential Secret in {g.get('repo')}",
+                        "severity": "medium",
+                        "host": domain,
+                        "matched_at": g.get("url") or g.get("path") or "",
+                        "description": f"GitHub code reference: query '{g.get('query')}' matched file {g.get('path')}",
+                    })
+            except Exception as e:
+                print(f"[!] GitHub leaks error: {e}")
+
+        # 9. Defensive Asset Audits Suite
+        if getattr(args, "audits", False) or full_audit:
+            try:
+                from .audits import (
+                    audit_email_security,
+                    audit_sensitive_files,
+                    detect_cloud_assets,
+                    detect_waf,
+                    fingerprint_favicons,
+                    grade_security_headers,
+                )
+
+                all_url_strings = [
+                    u["url"]
+                    for u in all_urls
+                    if isinstance(u, dict) and u.get("url")
+                ]
+                detect_cloud_assets(all_url_strings, live, out_dir)
+                if live:
+                    sens_files = audit_sensitive_files(
+                        live, out_dir, timeout=timeout or 5
+                    )
+                    for sf in sens_files:
+                        is_crit = ".env" in sf.get("file", "") or ".git" in sf.get(
+                            "file", ""
+                        )
+                        vuln_records.append({
+                            "template_id": "exposed-sensitive-file",
+                            "name": f"Exposed Sensitive File: {sf.get('file')}",
+                            "severity": "high" if is_crit else "medium",
+                            "host": sf.get("url") or domain,
+                            "matched_at": sf.get("url") or "",
+                            "description": sf.get("description", ""),
+                        })
+                    detect_waf(live, out_dir, timeout=timeout or 5)
+                    grade_security_headers(live, out_dir, timeout=timeout or 5)
+                    fingerprint_favicons(live, out_dir, timeout=timeout or 5)
+                audit_email_security(domain, out_dir, timeout=timeout or 5)
+            except Exception as e:
+                print(f"[!] Audits error: {e}")
+
+        # Update findings in DB and JSON if new records were generated
+        if vuln_records:
+            try:
+                (out_dir / "vulns.json").write_text(
+                    json.dumps(vuln_records, indent=2), encoding="utf-8"
+                )
+                from . import db
+
+                db.save_findings(db_path, domain, run_id, vuln_records)
+            except Exception:
+                pass
+
         write_report(
             domain,
             subs,
