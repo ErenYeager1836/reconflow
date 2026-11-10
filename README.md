@@ -155,6 +155,12 @@ pip install -e .
 
 A multi-stage container is provided with all supported external tools (`subfinder`, `httpx`, `dnsx`, `naabu`, `katana`, `nuclei`, `gau`, `waybackurls`) pre-installed under an unprivileged user:
 
+Pre-built multi-architecture images (`linux/amd64`, `linux/arm64`) are published to GitHub Container Registry on every tagged release:
+
+```bash
+docker pull ghcr.io/erenyeager1836/reconflow:latest
+```
+
 ```bash
 # Build the container:
 docker build -t reconflow .
